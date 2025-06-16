@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Search,
@@ -15,14 +15,14 @@ const EnterpriseSearchInterface = ({ onSearch, isLoading }) => {
 
   // Removed intelligenceTypes as the section was removed
 
-  const quickQueries = [
+  const quickQueries = useMemo(() => [
     'CBAM carbon border adjustment impact on petrochemicals',
     'SABIC petrochemical expansion strategy Middle East',
     'EU circular economy directive compliance requirements',
     'Asian polyethylene market forecast 2024-2025',
     'Carbon pricing mechanisms chemical industry',
     'Sustainable packaging regulations global overview'
-  ];
+  ], []);
 
   // Removed features array as the section was removed
 
@@ -35,7 +35,7 @@ const EnterpriseSearchInterface = ({ onSearch, isLoading }) => {
     } else {
       setSuggestions([]);
     }
-  }, [query]);
+  }, [query, quickQueries]);
 
   const handleSearch = () => {
     if (query.trim() && !isLoading) {

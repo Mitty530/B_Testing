@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { Analytics } from '@vercel/analytics/react';
 import EnterpriseSearchInterface from './components/EnterpriseSearchInterface';
 import EnterpriseResultsDisplay from './components/EnterpriseResultsDisplay';
