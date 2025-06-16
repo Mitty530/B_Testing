@@ -5,7 +5,8 @@
       "runtime": "@vercel/node@3.0.0"
     }
   },
-  "buildCommand": "cd frontend && npm run build",
+  "installCommand": "npm install && cd frontend && npm install",
+  "buildCommand": "./build.sh",
   "outputDirectory": "frontend/build",
 
   "headers": [
