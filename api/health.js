@@ -47,7 +47,7 @@ router.get('/', async (req, res) => {
 
     // Check Gemini AI connection
     try {
-      const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
       const result = await model.generateContent("Test connection");
       
       healthCheck.services.gemini = {

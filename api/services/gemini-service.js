@@ -5,10 +5,20 @@ const BoPromptLoader = require('../utils/bo-prompt-loader');
 class GeminiService {
   constructor() {
     this.genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-    this.model = this.genAI.getGenerativeModel({ model: "gemini-pro" });
+    this.model = this.genAI.getGenerativeModel({
+      model: "gemini-1.5-flash",
+      generationConfig: {
+        maxOutputTokens: 8192, // Maximum output tokens for comprehensive analysis
+        temperature: 0.1, // Low temperature for consistent, factual analysis
+        topP: 0.8,
+        topK: 40
+      }
+    });
     this.boPromptLoader = new BoPromptLoader();
     this.requestCount = 0;
-    this.maxDailyRequests = 50; // Conservative limit for free tier
+    this.maxDailyRequests = 1500; // Optimized for Gemini 1.5 Flash free tier
+    this.maxInputTokens = 32000; // Maximum input tokens per request
+    this.maxOutputTokens = 8192; // Maximum output tokens per request
   }
 
   /**
@@ -26,12 +36,13 @@ class GeminiService {
 
       this.requestCount++;
 
-      // Build enhanced prompt using Bo_Prompt
-      const enhancedPrompt = this.boPromptLoader.buildEnhancedPrompt(originalQuery, articles);
-      
+      // Build enhanced prompt using Bo_Prompt with token optimization
+      const enhancedPrompt = this.buildOptimizedPrompt(originalQuery, articles);
+
       console.log('Generating ESG intelligence with Gemini...');
       console.log('Articles count:', articles.length);
       console.log('Query:', originalQuery);
+      console.log('Estimated input tokens:', this.estimateTokens(enhancedPrompt));
 
       // Generate content with Gemini
       const result = await this.model.generateContent(enhancedPrompt);
@@ -227,6 +238,65 @@ class GeminiService {
   }
 
   /**
+   * Build optimized prompt with token management
+   */
+  buildOptimizedPrompt(originalQuery, articles) {
+    // Start with base Bo_Prompt
+    const basePrompt = this.boPromptLoader.buildEnhancedPrompt(originalQuery, articles);
+
+    // Estimate tokens and optimize if needed
+    const estimatedTokens = this.estimateTokens(basePrompt);
+
+    if (estimatedTokens > this.maxInputTokens * 0.9) { // Use 90% of limit for safety
+      console.log(`Prompt too long (${estimatedTokens} tokens), optimizing...`);
+      return this.optimizePromptLength(basePrompt, originalQuery, articles);
+    }
+
+    return basePrompt;
+  }
+
+  /**
+   * Estimate token count (rough approximation: 1 token ≈ 4 characters)
+   */
+  estimateTokens(text) {
+    return Math.ceil(text.length / 4);
+  }
+
+  /**
+   * Optimize prompt length while maintaining quality
+   */
+  optimizePromptLength(originalPrompt, query, articles) {
+    // Prioritize most relevant articles
+    const sortedArticles = articles
+      .sort((a, b) => (b.relevanceScore || 0) - (a.relevanceScore || 0))
+      .slice(0, 8); // Limit to top 8 articles
+
+    // Truncate article content to essential information
+    const optimizedArticles = sortedArticles.map(article => ({
+      ...article,
+      content: this.truncateContent(article.content || article.description || '', 500),
+      description: this.truncateContent(article.description || '', 200)
+    }));
+
+    return this.boPromptLoader.buildEnhancedPrompt(query, optimizedArticles);
+  }
+
+  /**
+   * Truncate content while preserving meaning
+   */
+  truncateContent(content, maxLength) {
+    if (content.length <= maxLength) return content;
+
+    // Find last complete sentence within limit
+    const truncated = content.substring(0, maxLength);
+    const lastSentence = truncated.lastIndexOf('.');
+
+    return lastSentence > maxLength * 0.7
+      ? truncated.substring(0, lastSentence + 1)
+      : truncated + '...';
+  }
+
+  /**
    * Validate query for ESG relevance
    */
   validateESGQuery(query) {
@@ -235,10 +305,10 @@ class GeminiService {
       'governance', 'social', 'regulation', 'policy', 'compliance',
       'circular economy', 'renewable', 'green', 'climate', 'biodiversity'
     ];
-    
+
     const lowercaseQuery = query.toLowerCase();
     const hasESGKeywords = esgKeywords.some(keyword => lowercaseQuery.includes(keyword));
-    
+
     return {
       isValid: hasESGKeywords || query.length > 10, // Allow general queries if substantial
       suggestions: hasESGKeywords ? [] : [
@@ -248,6 +318,22 @@ class GeminiService {
         'environmental compliance UAE petrochemicals',
         'circular economy plastic recycling'
       ]
+    };
+  }
+
+  /**
+   * Get enhanced usage statistics
+   */
+  getEnhancedUsageStats() {
+    return {
+      dailyRequestCount: this.requestCount,
+      maxDailyRequests: this.maxDailyRequests,
+      remainingRequests: this.maxDailyRequests - this.requestCount,
+      utilizationPercentage: Math.round((this.requestCount / this.maxDailyRequests) * 100),
+      maxInputTokens: this.maxInputTokens,
+      maxOutputTokens: this.maxOutputTokens,
+      resetTime: 'Daily at 00:00 UTC',
+      tier: 'Gemini 1.5 Flash Free Tier'
     };
   }
 }

@@ -65,25 +65,34 @@ router.post('/analyze', async (req, res) => {
 
     console.log('Starting ESG intelligence analysis for query:', query);
 
-    // 1. Create research session
-    const session = await supabaseService.createResearchSession(user.id, query);
-    sessionId = session.id;
+    // 1. Create research session (skip if Supabase unavailable)
+    try {
+      const session = await supabaseService.createResearchSession(user.id, query);
+      sessionId = session.id;
+    } catch (error) {
+      console.log('Supabase unavailable, proceeding without session tracking');
+      sessionId = 'temp-' + Date.now();
+    }
 
     // 2. Search for news articles
-    console.log('Searching for news articles...');
+    console.log('Searching for REAL news articles...');
     const newsResults = await newsService.searchNews(query, { limit: 20 });
     const articles = newsResults.articles;
 
     console.log(`Found ${articles.length} relevant articles`);
 
     // Check if we have enough articles for analysis
-    if (articles.length < 3) {
-      await supabaseService.markSessionAsFailed(sessionId, 'Insufficient relevant articles found');
+    if (articles.length < 1) {
+      try {
+        await supabaseService.markSessionAsFailed(sessionId, 'Insufficient relevant articles found');
+      } catch (error) {
+        console.log('Supabase unavailable, skipping session failure marking');
+      }
       return res.status(404).json({
         error: 'Insufficient relevant articles found for analysis',
         message: 'Please try a more specific ESG-related query',
         articlesFound: articles.length,
-        minimumRequired: 3,
+        minimumRequired: 1,
         suggestions: [
           'carbon emissions petrochemical industry',
           'ESG regulations chemical companies',
@@ -93,27 +102,43 @@ router.post('/analyze', async (req, res) => {
       });
     }
 
-    // 3. Store articles in database
-    await supabaseService.storeNewsArticles(sessionId, articles);
+    // 3. Store articles in database (skip if Supabase unavailable)
+    try {
+      await supabaseService.storeNewsArticles(sessionId, articles);
+    } catch (error) {
+      console.log('Supabase unavailable, skipping article storage');
+    }
 
     // 4. Generate ESG intelligence using Gemini
     console.log('Generating ESG intelligence analysis...');
     const intelligence = await geminiService.generateESGIntelligence(articles, query);
 
-    // 5. Store analysis results
-    await supabaseService.storeLLMAnalysis(sessionId, intelligence);
+    // 5. Store analysis results (skip if Supabase unavailable)
+    try {
+      await supabaseService.storeLLMAnalysis(sessionId, intelligence);
+    } catch (error) {
+      console.log('Supabase unavailable, skipping analysis storage');
+    }
 
-    // 6. Complete session
+    // 6. Complete session (skip if Supabase unavailable)
     const processingTime = Date.now() - startTime;
-    await supabaseService.completeResearchSession(
-      sessionId,
-      articles.length,
-      intelligence.confidence,
-      processingTime
-    );
+    try {
+      await supabaseService.completeResearchSession(
+        sessionId,
+        articles.length,
+        intelligence.confidence,
+        processingTime
+      );
+    } catch (error) {
+      console.log('Supabase unavailable, skipping session completion');
+    }
 
-    // 7. Track API usage
-    await supabaseService.trackAPIUsage('esg-intelligence', '/analyze', user.id, sessionId);
+    // 7. Track API usage (skip if Supabase unavailable)
+    try {
+      await supabaseService.trackAPIUsage('esg-intelligence', '/analyze', user.id, sessionId);
+    } catch (error) {
+      console.log('Supabase unavailable, skipping usage tracking');
+    }
 
     // 8. Return comprehensive results
     const response = {
@@ -147,9 +172,13 @@ router.post('/analyze', async (req, res) => {
   } catch (error) {
     console.error('ESG intelligence analysis error:', error);
 
-    // Mark session as failed if it was created
+    // Mark session as failed if it was created (skip if Supabase unavailable)
     if (sessionId) {
-      await supabaseService.markSessionAsFailed(sessionId, error.message);
+      try {
+        await supabaseService.markSessionAsFailed(sessionId, error.message);
+      } catch (dbError) {
+        console.log('Supabase unavailable, skipping session failure marking');
+      }
     }
 
     // Determine error type and status code
@@ -246,6 +275,162 @@ router.post('/feedback', async (req, res) => {
     console.error('Error submitting feedback:', error);
     res.status(500).json({
       error: 'Failed to submit feedback',
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+/**
+ * Test ESG Analysis (bypasses Supabase for local testing)
+ * POST /api/esg-intelligence/test
+ */
+router.post('/test', async (req, res) => {
+  const startTime = Date.now();
+
+  try {
+    const { query } = req.body;
+
+    if (!query || query.trim().length === 0) {
+      return res.status(400).json({
+        error: 'Query parameter is required',
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    console.log('Starting TEST ESG intelligence analysis for query:', query);
+
+    // 1. Search for news articles
+    console.log('Searching for news articles...');
+    const newsResults = await newsService.searchNews(query, { limit: 10 });
+    const articles = newsResults.articles;
+
+    console.log(`Found ${articles.length} relevant articles from ${newsResults.source || 'unknown'}`);
+
+    // Check if we have enough articles for analysis
+    if (articles.length < 2) {
+      return res.status(404).json({
+        error: 'Insufficient relevant articles found for analysis',
+        message: 'Please try a more specific ESG-related query',
+        articlesFound: articles.length,
+        minimumRequired: 2,
+        dataSource: newsResults.source,
+        suggestions: [
+          'carbon emissions petrochemical industry',
+          'ESG regulations chemical companies',
+          'sustainability initiatives polymer industry'
+        ],
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    // 2. Generate ESG intelligence using Gemini
+    console.log('Generating ESG intelligence analysis...');
+    const intelligence = await geminiService.generateESGIntelligence(articles, query);
+
+    // 3. Return comprehensive results
+    const processingTime = Date.now() - startTime;
+    const response = {
+      sessionId: 'test-' + Date.now(),
+      originalQuery: query,
+      dataSource: newsResults.source,
+      intelligence: {
+        executiveSummary: intelligence.structuredAnalysis?.executiveSummary,
+        criticalFindings: intelligence.structuredAnalysis?.criticalFindings || [],
+        financialImpact: intelligence.structuredAnalysis?.financialImpact || {},
+        strategicRecommendations: intelligence.structuredAnalysis?.strategicRecommendations || [],
+        competitiveBenchmarking: intelligence.structuredAnalysis?.competitiveBenchmarking,
+        riskOpportunityMatrix: intelligence.structuredAnalysis?.riskOpportunityMatrix,
+        monitoringRequirements: intelligence.structuredAnalysis?.monitoringRequirements
+      },
+      queryType: intelligence.queryType,
+      confidence: intelligence.confidence,
+      totalSources: articles.length,
+      topSources: intelligence.topSources,
+      borogueContext: intelligence.borogueContext,
+      processingTime: processingTime,
+      apiUsage: {
+        gemini: geminiService.getUsageStats(),
+        newsapi: newsService.getUsageStats()
+      },
+      timestamp: new Date().toISOString()
+    };
+
+    console.log('TEST ESG intelligence analysis completed successfully');
+    res.json(response);
+
+  } catch (error) {
+    console.error('TEST ESG intelligence analysis error:', error);
+
+    res.status(500).json({
+      error: 'Internal server error during ESG analysis',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined,
+      processingTime: Date.now() - startTime,
+      timestamp: new Date().toISOString()
+    });
+  }
+});
+
+/**
+ * Test Real NewsAPI.ai Integration
+ * POST /api/esg-intelligence/test-real-news
+ */
+router.post('/test-real-news', async (req, res) => {
+  const startTime = Date.now();
+
+  try {
+    const { query } = req.body;
+
+    if (!query || query.trim().length === 0) {
+      return res.status(400).json({
+        error: 'Query parameter is required',
+        timestamp: new Date().toISOString()
+      });
+    }
+
+    console.log('Testing REAL NewsAPI.ai integration for query:', query);
+
+    // Force real NewsAPI.ai usage by temporarily overriding the service
+    const originalEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production'; // Force real API usage
+
+    try {
+      const newsResults = await newsService.searchNews(query, { limit: 10 });
+      const articles = newsResults.articles;
+
+      console.log(`Real NewsAPI.ai returned ${articles.length} articles`);
+
+      const response = {
+        success: true,
+        query: query,
+        dataSource: newsResults.source,
+        articlesFound: articles.length,
+        totalResults: newsResults.totalResults,
+        requestsRemaining: newsResults.requestsRemaining,
+        sampleArticles: articles.slice(0, 3).map(article => ({
+          title: article.title,
+          source: article.source,
+          publishedAt: article.publishedAt,
+          relevanceScore: article.relevanceScore,
+          url: article.url
+        })),
+        processingTime: Date.now() - startTime,
+        timestamp: new Date().toISOString()
+      };
+
+      res.json(response);
+
+    } finally {
+      // Restore original environment
+      process.env.NODE_ENV = originalEnv;
+    }
+
+  } catch (error) {
+    console.error('Real NewsAPI.ai test error:', error);
+
+    res.status(500).json({
+      error: 'Failed to test real NewsAPI.ai integration',
+      details: error.message,
+      processingTime: Date.now() - startTime,
       timestamp: new Date().toISOString()
     });
   }
