@@ -2,6 +2,7 @@
   "name": "borouge-esg-intelligence",
   "version": "1.0.0",
   "description": "Borouge ESG Intelligence Platform - Strategic research intelligence for the petrochemical industry",
+  "homepage": ".",
   "main": "api/index.js",
   "scripts": {
     "start": "react-scripts start",
