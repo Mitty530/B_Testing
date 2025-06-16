@@ -1,0 +1,45 @@
+{
+  "name": "borouge-esg-intelligence",
+  "version": "1.0.0",
+  "description": "Borouge ESG Intelligence Platform - Strategic research intelligence for the petrochemical industry",
+  "main": "api/index.js",
+  "scripts": {
+    "dev": "vercel dev",
+    "build": "npm run build:frontend",
+    "build:frontend": "cd frontend && npm run build",
+    "start": "vercel dev",
+    "test": "jest",
+    "deploy": "vercel --prod"
+  },
+  "dependencies": {
+    "@google/generative-ai": "^0.2.1",
+    "@supabase/supabase-js": "^2.38.0",
+    "axios": "^1.6.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "helmet": "^7.1.0",
+    "morgan": "^1.10.0"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "nodemon": "^3.0.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Mitty530/borouge-esg-intelligence.git"
+  },
+  "keywords": [
+    "esg",
+    "intelligence",
+    "petrochemical",
+    "borouge",
+    "sustainability",
+    "research"
+  ],
+  "author": "Borouge ESG Intelligence Team",
+  "license": "MIT"
+}

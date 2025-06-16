@@ -1,0 +1,1987 @@
+# Borouge Research System - Phase 1 & 2 Implementation Guide
+
+## Tech Stack for Free Tier Setup
+
+### Backend
+- **Node.js** with Express.js
+- **Supabase** (free PostgreSQL database + auth)
+- **Google Gemini API** (free tier - 15 RPM)
+- **GNews API** (free tier - 100 requests/day)
+
+### Frontend
+- **React.js** with TypeScript
+- **Tailwind CSS** for styling
+- **Supabase Client** for database/auth
+- **Axios** for API calls
+
+### Infrastructure
+- **Vercel/Netlify** for free hosting
+- **Supabase** for backend infrastructure
+- **No Docker needed** (serverless deployment)
+
+---
+
+## PHASE 1 IMPLEMENTATION (MVP - 2 weeks)
+
+### 1. Project Structure Setup
+
+```
+borouge-research-system/
+├── backend/
+│   ├── src/
+│   │   ├── config/
+│   │   ├── controllers/
+│   │   ├── services/
+│   │   ├── models/
+│   │   ├── middleware/
+│   │   ├── routes/
+│   │   └── utils/
+│   ├── package.json
+│   └── Dockerfile
+├── frontend/
+│   ├── src/
+│   │   ├── components/
+│   │   ├── pages/
+│   │   ├── services/
+│   │   ├── hooks/
+│   │   └── types/
+│   ├── package.json
+│   └── Dockerfile
+└── docker-compose.yml
+```
+
+### 2. Supabase Database Setup
+
+```sql
+-- Run these in Supabase SQL Editor
+
+-- Users table (Supabase auth handles most user data)
+CREATE TABLE users (
+    id UUID REFERENCES auth.users(id) PRIMARY KEY,
+    email VARCHAR(255) UNIQUE NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    department VARCHAR(100),
+    role VARCHAR(50) DEFAULT 'researcher',
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Research sessions table
+CREATE TABLE research_sessions (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    user_id UUID REFERENCES users(id),
+    original_query TEXT NOT NULL,
+    enhanced_query TEXT,
+    session_status VARCHAR(50) DEFAULT 'processing',
+    started_at TIMESTAMP DEFAULT NOW(),
+    completed_at TIMESTAMP,
+    total_sources INTEGER DEFAULT 0
+);
+
+-- News sources table
+CREATE TABLE news_sources (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    session_id UUID REFERENCES research_sessions(id),
+    source_name VARCHAR(255),
+    url TEXT,
+    title TEXT,
+    description TEXT,
+    content TEXT,
+    published_at TIMESTAMP,
+    fetched_at TIMESTAMP DEFAULT NOW(),
+    relevance_score FLOAT DEFAULT 0,
+    source_credibility FLOAT DEFAULT 0
+);
+
+-- LLM Analysis results table
+CREATE TABLE llm_analysis (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    session_id UUID REFERENCES research_sessions(id),
+    analysis_type VARCHAR(50),
+    llm_response TEXT,
+    confidence_score FLOAT,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Enhanced queries table for learning
+CREATE TABLE query_enhancements (
+    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+    original_query TEXT,
+    enhanced_query TEXT,
+    success_score FLOAT,
+    user_feedback VARCHAR(20),
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+-- Enable Row Level Security
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE research_sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE news_sources ENABLE ROW LEVEL SECURITY;
+ALTER TABLE llm_analysis ENABLE ROW LEVEL SECURITY;
+
+-- Create policies for RLS
+CREATE POLICY "Users can only see their own data" ON users FOR ALL USING (auth.uid() = id);
+CREATE POLICY "Users can only see their own sessions" ON research_sessions FOR ALL USING (auth.uid() = user_id);
+CREATE POLICY "Users can only see their session sources" ON news_sources FOR ALL USING (
+    session_id IN (SELECT id FROM research_sessions WHERE user_id = auth.uid())
+);
+CREATE POLICY "Users can only see their session analysis" ON llm_analysis FOR ALL USING (
+    session_id IN (SELECT id FROM research_sessions WHERE user_id = auth.uid())
+);
+
+-- Create indexes for performance
+CREATE INDEX idx_research_sessions_user_id ON research_sessions(user_id);
+CREATE INDEX idx_news_sources_session_id ON news_sources(session_id);
+CREATE INDEX idx_news_sources_relevance ON news_sources(relevance_score DESC);
+```
+
+### 3. Supabase Configuration
+
+```javascript
+// backend/src/config/supabase.js
+const { createClient } = require('@supabase/supabase-js');
+
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY; // Use service role for backend
+
+const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
+module.exports = supabase;
+```
+
+```javascript
+// backend/src/config/constants.js (Updated for Borouge ESG Focus)
+module.exports = {
+  BOROUGE_CONTEXT: {
+    company: 'Borouge',
+    business_focus: ['polyethylene', 'polypropylene', 'petrochemicals', 'ESG', 'sustainability'],
+    markets: ['UAE', 'Singapore', 'Europe', 'Asia'],
+    competitors: ['SABIC', 'Dow Chemical', 'ExxonMobil Chemical', 'EQUATE', 'QAPCO'],
+    revenue_exposure: {
+      eu_market: 2.3, // billion EUR
+      asian_market: 1.8, // billion USD
+      total_revenue: 8.5 // billion USD
+    }
+  },
+  
+  INDUSTRY_TERMS: {
+    plastic: ['polymer', 'polyethylene', 'polypropylene', 'LLDPE', 'HDPE', 'petrochemical', 'thermoplastic'],
+    policies: ['regulations', 'directive', 'compliance', 'REACH', 'CBAM', 'legislation', 'standards'],
+    europe: ['EU', 'European Union', 'REACH', 'ECHA', 'European Commission', 'CBAM'],
+    esg: ['ESG', 'sustainability', 'carbon footprint', 'circular economy', 'environmental'],
+    market: ['market analysis', 'industry trends', 'supply chain', 'pricing', 'demand', 'capacity'],
+    technology: ['chemical recycling', 'bio-based', 'carbon capture', 'innovation', 'R&D']
+  },
+  
+  EXCLUDE_TERMS: ['surgery', 'medical', 'cosmetic', 'beauty', 'health', 'food packaging consumer'],
+  
+  PRIORITIZE_TERMS: ['chemical industry', 'petrochemical', 'B2B', 'industrial', 'Borouge', 'polyolefins'],
+  
+  NEWS_SOURCES: {
+    free_tier: {
+      gnews: {
+        daily_limit: 100,
+        weight: 0.6
+      },
+      newsapi: {
+        daily_limit: 1000,
+        weight: 0.4
+      }
+    }
+  }
+};
+```
+
+### 4. Query Enhancement Engine
+
+```javascript
+// backend/src/services/queryEnhancer.js
+const { INDUSTRY_TERMS, EXCLUDE_TERMS, PRIORITIZE_TERMS } = require('../config/constants');
+
+class QueryEnhancer {
+  constructor() {
+    this.industryKeywords = INDUSTRY_TERMS;
+    this.excludeTerms = EXCLUDE_TERMS;
+    this.prioritizeTerms = PRIORITIZE_TERMS;
+  }
+
+  async enhanceQuery(originalQuery) {
+    try {
+      // Step 1: Detect query type and context
+      const queryContext = this.detectContext(originalQuery);
+      
+      // Step 2: Add industry-specific terms
+      const enhancedTerms = this.addIndustryTerms(originalQuery, queryContext);
+      
+      // Step 3: Create search variations
+      const searchVariations = this.createSearchVariations(enhancedTerms);
+      
+      // Step 4: Add exclusion filters
+      const filteredQuery = this.addExclusionFilters(searchVariations);
+      
+      const result = {
+        original: originalQuery,
+        enhanced: filteredQuery.primary,
+        variations: filteredQuery.variations,
+        context: queryContext,
+        filters: filteredQuery.filters
+      };
+
+      // Store for learning
+      await this.storeEnhancement(originalQuery, result);
+      
+      return result;
+    } catch (error) {
+      console.error('Query enhancement error:', error);
+      return { original: originalQuery, enhanced: originalQuery };
+    }
+  }
+
+  detectContext(query) {
+    const lowercaseQuery = query.toLowerCase();
+    const contexts = [];
+
+    // Detect main categories
+    Object.entries(this.industryKeywords).forEach(([category, terms]) => {
+      const matches = terms.filter(term => 
+        lowercaseQuery.includes(term.toLowerCase())
+      );
+      if (matches.length > 0) {
+        contexts.push({
+          category,
+          matches,
+          confidence: matches.length / terms.length
+        });
+      }
+    });
+
+    return contexts;
+  }
+
+  addIndustryTerms(query, contexts) {
+    let enhanced = query;
+    
+    contexts.forEach(context => {
+      const additionalTerms = this.industryKeywords[context.category]
+        .filter(term => !query.toLowerCase().includes(term.toLowerCase()))
+        .slice(0, 3); // Limit to 3 additional terms per category
+      
+      enhanced += ' ' + additionalTerms.join(' ');
+    });
+
+    // Always add Borouge's core business terms
+    enhanced += ' "chemical industry" petrochemical polymer';
+    
+    return enhanced.trim();
+  }
+
+  createSearchVariations(enhancedQuery) {
+    const baseTerms = enhancedQuery.split(' ');
+    
+    return {
+      primary: enhancedQuery,
+      strict: `"${enhancedQuery.split(' ').slice(0, 5).join(' ')}"`,
+      broad: baseTerms.concat(this.prioritizeTerms).join(' '),
+      industry: baseTerms.concat(['chemical industry', 'B2B', 'industrial']).join(' ')
+    };
+  }
+
+  addExclusionFilters(variations) {
+    const exclusionFilter = this.excludeTerms.map(term => `-"${term}"`).join(' ');
+    
+    return {
+      primary: `${variations.primary} ${exclusionFilter}`,
+      variations: Object.fromEntries(
+        Object.entries(variations).map(([key, value]) => [
+          key, `${value} ${exclusionFilter}`
+        ])
+      ),
+      filters: {
+        exclude: this.excludeTerms,
+        prioritize: this.prioritizeTerms
+      }
+    };
+  }
+
+  async storeEnhancement(original, enhanced) {
+    // Store in database for learning - implement based on your database setup
+    console.log('Storing enhancement:', { original, enhanced: enhanced.enhanced });
+  }
+}
+
+module.exports = QueryEnhancer;
+```
+
+### 5. Free Tier News API Integration Service
+
+```javascript
+// backend/src/services/newsService.js
+const axios = require('axios');
+const { NEWS_SOURCES, BOROUGE_CONTEXT } = require('../config/constants');
+
+class FreeNewsService {
+  constructor() {
+    this.apiKeys = {
+      gnews: process.env.GNEWS_API_KEY,
+      newsapi: process.env.NEWSAPI_KEY // Optional fallback
+    };
+    this.dailyRequestCount = {
+      gnews: 0,
+      newsapi: 0
+    };
+  }
+
+  async searchNews(enhancedQuery, options = {}) {
+    try {
+      const searchPromises = [];
+
+      // Primary: GNews (100 requests/day free)
+      if (this.dailyRequestCount.gnews < 80) { // Leave buffer
+        searchPromises.push(this.searchGNews(enhancedQuery.enhanced, options));
+      }
+
+      // Fallback: NewsAPI (1000 requests/day free)
+      if (this.apiKeys.newsapi && this.dailyRequestCount.newsapi < 900) {
+        searchPromises.push(this.searchNewsAPI(enhancedQuery.enhanced, options));
+      }
+
+      const results = await Promise.allSettled(searchPromises);
+      
+      // Combine and process results
+      const allArticles = [];
+      results.forEach((result, index) => {
+        if (result.status === 'fulfilled' && result.value) {
+          allArticles.push(...result.value.map(article => ({
+            ...article,
+            sourceApi: ['gnews', 'newsapi'][index]
+          })));
+        }
+      });
+
+      // Process articles with Borouge-specific relevance
+      const processedArticles = this.processArticlesForBorouge(allArticles, enhancedQuery);
+      
+      return processedArticles;
+    } catch (error) {
+      console.error('News search error:', error);
+      throw error;
+    }
+  }
+
+  async searchGNews(query, options) {
+    try {
+      this.dailyRequestCount.gnews++;
+      
+      // Add Borouge-specific context to query
+      const borogueQuery = `${query} (petrochemical OR chemical industry OR polymer OR Borouge OR SABIC OR polyethylene)`;
+      
+      const response = await axios.get('https://gnews.io/api/v4/search', {
+        params: {
+          q: borogueQuery,
+          lang: 'en',
+          country: 'us',
+          max: options.limit || 10,
+          apikey: this.apiKeys.gnews,
+          sortby: 'relevance'
+        },
+        timeout: 10000
+      });
+
+      return response.data.articles.map(article => ({
+        title: article.title,
+        description: article.description,
+        url: article.url,
+        source: article.source.name,
+        publishedAt: article.publishedAt,
+        content: article.content || article.description,
+        imageUrl: article.image
+      }));
+    } catch (error) {
+      console.error('GNews error:', error);
+      return [];
+    }
+  }
+
+  async searchNewsAPI(query, options) {
+    try {
+      this.dailyRequestCount.newsapi++;
+      
+      const response = await axios.get('https://newsapi.org/v2/everything', {
+        params: {
+          q: `${query} AND (petrochemical OR "chemical industry" OR polymer)`,
+          language: 'en',
+          sortBy: 'relevancy',
+          pageSize: options.limit || 10,
+          // Focus on business and industry sources
+          sources: 'reuters,bloomberg,the-wall-street-journal,financial-times',
+          apiKey: this.apiKeys.newsapi
+        },
+        timeout: 10000
+      });
+
+      return response.data.articles.map(article => ({
+        title: article.title,
+        description: article.description,
+        url: article.url,
+        source: article.source.name,
+        publishedAt: article.publishedAt,
+        content: article.content || article.description,
+        imageUrl: article.urlToImage
+      }));
+    } catch (error) {
+      console.error('NewsAPI error:', error);
+      return [];
+    }
+  }
+
+  processArticlesForBorouge(articles, enhancedQuery) {
+    // Remove duplicates
+    const uniqueArticles = this.removeDuplicates(articles);
+    
+    // Score relevance with Borouge-specific context
+    const scoredArticles = uniqueArticles.map(article => ({
+      ...article,
+      relevanceScore: this.calculateBorogueRelevanceScore(article, enhancedQuery),
+      credibilityScore: this.calculateCredibilityScore(article),
+      borogueImpact: this.assessBorogueImpact(article)
+    }));
+
+    // Filter and sort by Borouge relevance
+    return scoredArticles
+      .filter(article => article.relevanceScore > 0.2) // Lower threshold for free tier
+      .sort((a, b) => (b.relevanceScore + b.credibilityScore + b.borogueImpact) - 
+                     (a.relevanceScore + a.credibilityScore + a.borogueImpact))
+      .slice(0, 30); // Limit to top 30 results
+  }
+
+  calculateBorogueRelevanceScore(article, enhancedQuery) {
+    const text = `${article.title} ${article.description}`.toLowerCase();
+    
+    let score = 0;
+    
+    // Borouge-specific terms (high weight)
+    const borogueTerms = ['borouge', 'petrochemical', 'polyethylene', 'polypropylene', 'polymer'];
+    borogueTerms.forEach(term => {
+      if (text.includes(term)) score += 0.3;
+    });
+    
+    // Market/geographic relevance
+    const marketTerms = ['uae', 'singapore', 'europe', 'asia', 'middle east'];
+    marketTerms.forEach(term => {
+      if (text.includes(term)) score += 0.2;
+    });
+    
+    // Competitor mentions (strategic intelligence)
+    const competitorTerms = ['sabic', 'dow chemical', 'exxonmobil chemical'];
+    competitorTerms.forEach(term => {
+      if (text.includes(term)) score += 0.25;
+    });
+    
+    // ESG and regulatory terms
+    const esgTerms = ['esg', 'sustainability', 'regulation', 'carbon', 'circular economy'];
+    esgTerms.forEach(term => {
+      if (text.includes(term)) score += 0.15;
+    });
+    
+    // Original query terms
+    const queryTerms = enhancedQuery.enhanced.toLowerCase().split(' ');
+    queryTerms.forEach(term => {
+      if (term.length > 2 && text.includes(term)) score += 0.1;
+    });
+    
+    return Math.min(score, 1.0); // Cap at 1.0
+  }
+
+  assessBorogueImpact(article) {
+    const text = `${article.title} ${article.description}`.toLowerCase();
+    
+    // High impact indicators
+    if (text.includes('regulation') || text.includes('policy') || text.includes('carbon tax')) {
+      return 0.8;
+    }
+    
+    // Medium impact indicators
+    if (text.includes('market') || text.includes('price') || text.includes('competitor')) {
+      return 0.6;
+    }
+    
+    // Low impact indicators
+    if (text.includes('industry') || text.includes('technology')) {
+      return 0.4;
+    }
+    
+    return 0.2;
+  }
+
+  removeDuplicates(articles) {
+    const seen = new Set();
+    return articles.filter(article => {
+      const key = article.url || article.title.substring(0, 50);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+
+  calculateCredibilityScore(article) {
+    const trustedSources = [
+      'reuters', 'bloomberg', 'financial times', 'wall street journal',
+      'chemical week', 'icis', 'plastics news', 'oil gas journal'
+    ];
+    
+    const sourceName = article.source.toLowerCase();
+    const isTrusted = trustedSources.some(trusted => sourceName.includes(trusted));
+    
+    return isTrusted ? 0.9 : 0.5;
+  }
+
+  // Rate limiting helper
+  resetDailyCounters() {
+    this.dailyRequestCount = { gnews: 0, newsapi: 0 };
+  }
+}
+
+module.exports = FreeNewsService;
+```
+
+### 6. Gemini AI Analysis Service (Free Tier)
+
+```javascript
+// backend/src/services/geminiAnalysisService.js
+const { GoogleGenerativeAI } = require('@google/generative-ai');
+const { BOROUGE_CONTEXT } = require('../config/constants');
+
+class GeminiAnalysisService {
+  constructor() {
+    this.genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
+    this.model = this.genAI.getGenerativeModel({ model: "gemini-pro" });
+    this.requestCount = 0;
+    this.maxDailyRequests = 50; // Conservative limit for free tier
+  }
+
+  async generateBorogueIntelligence(articles, originalQuery) {
+    try {
+      if (this.requestCount >= this.maxDailyRequests) {
+        throw new Error('Daily Gemini API limit reached');
+      }
+
+      this.requestCount++;
+
+      // Prepare articles for Borouge-specific analysis
+      const articlesText = articles.slice(0, 8).map((article, index) => 
+        `Article ${index + 1}:
+Title: ${article.title}
+Source: ${article.source}
+Date: ${article.publishedAt}
+Content: ${article.description}
+Borouge Relevance Score: ${article.relevanceScore}
+Impact Assessment: ${article.borogueImpact}
+---`
+      ).join('\n\n');
+
+      const boroguePrompt = this.createBorogueESGPrompt(articlesText, originalQuery);
+
+      const result = await this.model.generateContent(boroguePrompt);
+      const response = await result.response;
+      const rawAnalysis = response.text();
+
+      // Parse the JSON response from the Gemini API
+      let structuredAnalysis;
+      try {
+        // Extract JSON from the response (it might be wrapped in markdown code blocks)
+        const jsonMatch = rawAnalysis.match(/```json\n([\s\S]*?)\n```/) || rawAnalysis.match(/(\{[\s\S]*\})/);
+        if (jsonMatch) {
+          structuredAnalysis = JSON.parse(jsonMatch[1]);
+        } else {
+          // Fallback: try to parse the entire response as JSON
+          structuredAnalysis = JSON.parse(rawAnalysis);
+        }
+      } catch (parseError) {
+        console.warn('Failed to parse JSON response, using text analysis:', parseError);
+        // Fallback to text analysis if JSON parsing fails
+        structuredAnalysis = this.createFallbackStructure(rawAnalysis, originalQuery);
+      }
+
+      return {
+        analysis: rawAnalysis,
+        structuredAnalysis: structuredAnalysis,
+        sourceCount: articles.length,
+        queryType: this.detectQueryType(originalQuery),
+        borogueContext: this.extractBorogueContext(structuredAnalysis),
+        confidence: this.calculateConfidence(articles.length),
+        topSources: articles.slice(0, 5).map(a => ({
+          title: a.title,
+          source: a.source,
+          url: a.url,
+          relevanceScore: a.relevanceScore
+        })),
+        financialImpact: structuredAnalysis.financialImpact || {},
+        strategicRecommendations: structuredAnalysis.strategicRecommendations || [],
+        criticalFindings: structuredAnalysis.criticalFindings || []
+      };
+    } catch (error) {
+      console.error('Gemini analysis error:', error);
+      throw error;
+    }
+  }
+
+  createFallbackStructure(textAnalysis, originalQuery) {
+    // Create a structured fallback if JSON parsing fails
+    return {
+      executiveSummary: this.extractSection(textAnalysis, 'EXECUTIVE SUMMARY') || 
+                       `Analysis of ${originalQuery} for Borouge strategic intelligence.`,
+      criticalFindings: [{
+        priority: "MEDIUM",
+        title: "Analysis Results",
+        description: this.extractSection(textAnalysis, 'BUSINESS IMPACT') || textAnalysis.substring(0, 500),
+        borogueSpecificImpact: this.extractSection(textAnalysis, 'Borouge') || "Impact assessment pending detailed analysis",
+        competitiveImplication: this.extractSection(textAnalysis, 'COMPETITIVE') || "Competitive analysis in progress",
+        actionRequired: "Review detailed analysis and determine next steps"
+      }],
+      financialImpact: {
+        shortTerm: this.extractFinancialMentions(textAnalysis)[0] || "Assessment pending",
+        mediumTerm: "Strategic investment analysis required",
+        longTerm: "Long-term positioning under review",
+        investmentRequired: "Investment requirements to be quantified"
+      },
+      strategicRecommendations: [
+        "Review analysis findings",
+        "Engage relevant business functions",
+        "Develop action plan based on priorities"
+      ],
+      competitiveBenchmarking: this.extractSection(textAnalysis, 'competitor') || "Competitive analysis pending",
+      riskOpportunityMatrix: "Risk and opportunity assessment in progress",
+      monitoringRequirements: "Ongoing monitoring framework to be established"
+    };
+  }
+
+  extractSection(text, sectionKeyword) {
+    const lines = text.split('\n');
+    let extracting = false;
+    let extracted = [];
+    
+    for (const line of lines) {
+      if (line.toLowerCase().includes(sectionKeyword.toLowerCase())) {
+        extracting = true;
+        continue;
+      }
+      if (extracting && line.trim() === '') {
+        if (extracted.length > 0) break;
+        continue;
+      }
+      if (extracting && line.startsWith('##')) {
+        break;
+      }
+      if (extracting) {
+        extracted.push(line);
+      }
+    }
+    
+    return extracted.join('\n').trim();
+  }
+
+  createBorogueESGPrompt(articlesText, originalQuery) {
+    return `# Borouge ESG Intelligence Master Prompt
+
+You are **Borouge's Senior ESG Intelligence Analyst**, a specialized AI consultant with deep expertise in petrochemical industry dynamics, regulatory frameworks, and strategic business intelligence. Your role is to provide actionable, quantified, and strategically relevant analysis that directly impacts Borouge's business operations and competitive positioning.
+
+## 🏢 **BOROUGE COMPANY PROFILE - CRITICAL CONTEXT**
+
+### **Core Business Operations:**
+- **Company**: Borouge Pte Ltd (Joint Venture: ADNOC 54%, Borealis 36%, Public 10%)
+- **Headquarters**: Singapore (Operations: UAE - Ruwais Industrial Complex)
+- **Business Model**: Integrated petrochemical producer specializing in polyolefins
+- **Production Capacity**: 5.0 million tonnes annually (4.5M PE + 0.5M PP)
+- **Key Products**: Linear Low-Density Polyethylene (LLDPE), High-Density Polyethylene (HDPE), Polypropylene (PP)
+
+### **Financial Exposure & Market Position:**
+- **Total Revenue**: ~$8.5 billion annually (2023 baseline)
+- **EU Market Exposure**: €2.3 billion annual exports (27% of total revenue)
+- **Asian Market Exposure**: $1.8 billion annual revenue (Singapore, China, India focus)
+- **EBITDA Margin**: ~15-20% (petrochemical industry average)
+- **Market Cap**: ~$20 billion (as of listing)
+
+### **Competitive Landscape Analysis:**
+- **Primary Competitors**: SABIC ($35B revenue), Dow Chemical ($57B), ExxonMobil Chemical ($15B segment)
+- **Regional Competitors**: EQUATE (Kuwait), QAPCO (Qatar), Petro Rabigh (Saudi Arabia)
+- **Competitive Advantages**: Integrated feedstock, strategic location, government backing
+- **Vulnerabilities**: Single-site production, regulatory exposure, feedstock price volatility
+
+## 🎯 **QUERY ANALYSIS**
+**Original Query**: "${originalQuery}"
+
+**News Intelligence Data:**
+${articlesText}
+
+## 📊 **ANALYTICAL FRAMEWORK - MULTI-DIMENSIONAL IMPACT ASSESSMENT**
+
+### **Step 1: Context Classification**
+Identify query type: Regulatory compliance | Competitive intelligence | Market opportunity/threat | Technology/innovation | Financial/investment
+
+### **Step 2: Multi-Level Impact Analysis**
+- **Direct**: Immediate Borouge operations impact
+- **Indirect**: Supply chain, customer, regulatory ecosystem effects
+- **Systemic**: Industry transformation, competitive landscape shifts
+- **Strategic**: Long-term positioning and competitive advantage implications
+
+### **Step 3: Quantified Business Intelligence**
+For every finding, analyze and quantify:
+
+**Revenue Impact Quantification:**
+- EU exports exposure: €2.3B at risk from regulatory changes
+- Asian market dynamics: $1.8B revenue sensitivity to trade policies
+- Product-specific impact: LLDPE vs HDPE vs PP market variations
+- Time-horizon analysis: Immediate (0-1 year), Medium (1-3 years), Long-term (3-10 years)
+
+**Financial Quantification Requirements:**
+- CAPEX implications (infrastructure, technology, compliance systems)
+- OPEX impact (ongoing operational costs, carbon pricing, compliance)
+- Working capital effects (inventory, receivables, regulatory reserves)
+- EBITDA margin impact (percentage point changes with dollar values)
+
+**Competitive Positioning Dynamics:**
+- SABIC strategic response analysis (similar UAE context)
+- Dow/ExxonMobil global strategy alignment opportunities
+- European competitor advantages/disadvantages (Borealis synergies)
+- Asian regional competitive landscape shifts
+
+## 🚀 **REQUIRED OUTPUT FORMAT**
+
+Provide your analysis in this exact JSON structure:
+
+\`\`\`json
+{
+  "executiveSummary": "2-3 sentences with quantified business impact magnitude ($), strategic implication (opportunity vs threat), and timeline urgency",
+  "criticalFindings": [
+    {
+      "priority": "HIGH|MEDIUM|LOW",
+      "title": "Specific business impact area",
+      "description": "Detailed analysis with quantification",
+      "borogueSpecificImpact": "Direct implications for Borouge operations/strategy with specific $ amounts",
+      "competitiveImplication": "Relative positioning vs SABIC/Dow/ExxonMobil with strategic context",
+      "actionRequired": "Specific next steps with responsible function (Legal, Operations, Strategy, Finance)"
+    }
+  ],
+  "financialImpact": {
+    "shortTerm": "0-2 years quantified impact with specific $ ranges",
+    "mediumTerm": "2-5 years strategic implications with investment requirements", 
+    "longTerm": "5-10 years competitive positioning with market leadership opportunities",
+    "investmentRequired": "CAPEX/OPEX requirements with specific dollar ranges"
+  },
+  "strategicRecommendations": [
+    "Immediate actions (0-6 months) with specific compliance/risk mitigation steps",
+    "Strategic initiatives (6-24 months) with investment decisions and market positioning", 
+    "Long-term positioning (2-5 years) with competitive advantage building and innovation"
+  ],
+  "competitiveBenchmarking": "Detailed analysis vs primary competitors with specific strategic positioning advantages/disadvantages",
+  "riskOpportunityMatrix": "Risk mitigation strategies vs opportunity capture with prioritization and resource allocation",
+  "monitoringRequirements": "Ongoing intelligence needs with specific metrics, sources, and review frequencies"
+}
+\`\`\`
+
+## 🎯 **KEY PERFORMANCE STANDARDS:**
+- **Quantification**: Every business impact MUST include specific financial estimates in dollars/euros
+- **Specificity**: Borouge-specific implications, not generic industry analysis
+- **Actionability**: Clear next steps with responsible functions identified (Legal, Operations, Strategy, Finance)
+- **Competitive Context**: Relative positioning vs named competitors (SABIC, Dow, ExxonMobil)
+- **Time Sensitivity**: Urgent vs strategic vs long-term classification with specific timelines
+- **Source Credibility**: Assessment of information reliability and confidence levels
+
+**CRITICAL REMINDER**: You are Borouge's strategic intelligence asset, delivering insights that directly influence multi-million dollar business decisions. Every response must be actionable, quantified, and strategically relevant to Borouge's specific market position and competitive challenges. Focus on financial impact, competitive positioning, and strategic recommendations that drive business value.`;
+  }
+
+  detectQueryType(query) {
+    const lowercaseQuery = query.toLowerCase();
+    
+    if (lowercaseQuery.includes('regulat') || lowercaseQuery.includes('polic') || lowercaseQuery.includes('compli')) {
+      return 'regulatory_intelligence';
+    } else if (lowercaseQuery.includes('compet') || lowercaseQuery.includes('sabic') || lowercaseQuery.includes('dow')) {
+      return 'competitive_intelligence';
+    } else if (lowercaseQuery.includes('market') || lowercaseQuery.includes('price') || lowercaseQuery.includes('demand')) {
+      return 'market_analysis';
+    } else if (lowercaseQuery.includes('esg') || lowercaseQuery.includes('sustain') || lowercaseQuery.includes('carbon')) {
+      return 'esg_analysis';
+    } else {
+      return 'general_intelligence';
+    }
+  }
+
+  extractBorogueContext(structuredAnalysis) {
+    // Extract key business metrics and impacts from the structured analysis
+    if (!structuredAnalysis) return {};
+    
+    return {
+      executiveSummary: structuredAnalysis.executiveSummary || '',
+      priorityFindings: (structuredAnalysis.criticalFindings || [])
+        .filter(f => f.priority === 'HIGH')
+        .map(f => f.title),
+      financialExposure: {
+        shortTerm: structuredAnalysis.financialImpact?.shortTerm || '',
+        mediumTerm: structuredAnalysis.financialImpact?.mediumTerm || '',
+        longTerm: structuredAnalysis.financialImpact?.longTerm || '',
+        investmentRequired: structuredAnalysis.financialImpact?.investmentRequired || ''
+      },
+      competitivePositioning: structuredAnalysis.competitiveBenchmarking || '',
+      strategicActions: structuredAnalysis.strategicRecommendations || [],
+      riskLevel: this.assessRiskLevelFromFindings(structuredAnalysis.criticalFindings || []),
+      monitoringNeeds: structuredAnalysis.monitoringRequirements || '',
+      revenueImpact: this.extractFinancialMentions(JSON.stringify(structuredAnalysis)),
+      timeframe: this.extractTimeframeMentions(JSON.stringify(structuredAnalysis)),
+      competitors: this.extractCompetitorMentions(JSON.stringify(structuredAnalysis))
+    };
+  }
+
+  assessRiskLevelFromFindings(criticalFindings) {
+    const highPriorityCount = criticalFindings.filter(f => f.priority === 'HIGH').length;
+    const mediumPriorityCount = criticalFindings.filter(f => f.priority === 'MEDIUM').length;
+    
+    if (highPriorityCount >= 2) return 'HIGH';
+    if (highPriorityCount >= 1 || mediumPriorityCount >= 3) return 'MEDIUM';
+    return 'LOW';
+  }
+
+  extractFinancialMentions(text) {
+    const financialPatterns = [
+      /\$\d+\.?\d*\s*[bB]illion/g,
+      /€\d+\.?\d*\s*[bB]illion/g,
+      /\d+%\s*of\s*revenue/g,
+      /EBITDA.*\d+/g
+    ];
+    
+    let mentions = [];
+    financialPatterns.forEach(pattern => {
+      const matches = text.match(pattern);
+      if (matches) mentions.push(...matches);
+    });
+    
+    return mentions;
+  }
+
+  extractTimeframeMentions(text) {
+    const timePatterns = [
+      /\d+-\d+\s*years?/g,
+      /immediate/gi,
+      /short[- ]?term/gi,
+      /long[- ]?term/gi,
+      /\d+\s*months?/g
+    ];
+    
+    let timeframes = [];
+    timePatterns.forEach(pattern => {
+      const matches = text.match(pattern);
+      if (matches) timeframes.push(...matches);
+    });
+    
+    return timeframes;
+  }
+
+  extractCompetitorMentions(text) {
+    const competitors = ['SABIC', 'Dow', 'ExxonMobil', 'EQUATE', 'QAPCO'];
+    return competitors.filter(comp => 
+      text.toLowerCase().includes(comp.toLowerCase())
+    );
+  }
+
+  assessRiskLevel(text) {
+    const highRiskKeywords = ['critical', 'urgent', 'significant impact', 'major threat'];
+    const mediumRiskKeywords = ['moderate', 'potential', 'possible impact'];
+    
+    const highRiskCount = highRiskKeywords.reduce((count, keyword) => 
+      count + (text.toLowerCase().includes(keyword) ? 1 : 0), 0);
+    
+    if (highRiskCount > 0) return 'HIGH';
+    
+    const mediumRiskCount = mediumRiskKeywords.reduce((count, keyword) => 
+      count + (text.toLowerCase().includes(keyword) ? 1 : 0), 0);
+    
+    return mediumRiskCount > 0 ? 'MEDIUM' : 'LOW';
+  }
+
+  calculateConfidence(sourceCount) {
+    // Confidence based on number of sources and their quality
+    if (sourceCount >= 10) return 0.9;
+    if (sourceCount >= 5) return 0.8;
+    if (sourceCount >= 3) return 0.7;
+    return 0.6;
+  }
+
+  // Rate limiting helper
+  resetDailyCounter() {
+    this.requestCount = 0;
+  }
+
+  getRemainingRequests() {
+    return this.maxDailyRequests - this.requestCount;
+  }
+}
+
+module.exports = GeminiAnalysisService;
+```
+
+### 7. Updated Research Controller (Supabase + Free APIs)
+
+```javascript
+// backend/src/controllers/researchController.js
+const QueryEnhancer = require('../services/queryEnhancer');
+const FreeNewsService = require('../services/newsService');
+const GeminiAnalysisService = require('../services/geminiAnalysisService');
+const supabase = require('../config/supabase');
+
+class ResearchController {
+  constructor() {
+    this.queryEnhancer = new QueryEnhancer();
+    this.newsService = new FreeNewsService();
+    this.analysisService = new GeminiAnalysisService();
+  }
+
+  async conductResearch(req, res) {
+    const { query, userId } = req.body;
+    
+    try {
+      // Check API rate limits first
+      const remainingRequests = this.analysisService.getRemainingRequests();
+      if (remainingRequests <= 0) {
+        return res.status(429).json({ 
+          error: 'Daily analysis limit reached. Please try again tomorrow.',
+          retryAfter: '24 hours'
+        });
+      }
+
+      // 1. Create research session in Supabase
+      const { data: sessionData, error: sessionError } = await supabase
+        .from('research_sessions')
+        .insert({
+          user_id: userId,
+          original_query: query,
+          session_status: 'processing'
+        })
+        .select()
+        .single();
+
+      if (sessionError) throw sessionError;
+      const sessionId = sessionData.id;
+
+      // 2. Enhance query with Borouge context
+      const enhancedQuery = await this.queryEnhancer.enhanceQuery(query);
+      
+      // Update session with enhanced query
+      await supabase
+        .from('research_sessions')
+        .update({ enhanced_query: enhancedQuery.enhanced })
+        .eq('id', sessionId);
+
+      // 3. Search news with free APIs
+      const articles = await this.newsService.searchNews(enhancedQuery, { limit: 15 });
+
+      // 4. Store articles in Supabase
+      if (articles.length > 0) {
+        const articleInserts = articles.map(article => ({
+          session_id: sessionId,
+          source_name: article.source,
+          url: article.url,
+          title: article.title,
+          description: article.description,
+          content: article.content,
+          published_at: article.publishedAt,
+          relevance_score: article.relevanceScore,
+          source_credibility: article.credibilityScore
+        }));
+
+        await supabase
+          .from('news_sources')
+          .insert(articleInserts);
+      }
+
+      // 5. Generate Borouge-specific intelligence using Gemini
+      const intelligence = await this.analysisService.generateBorogueIntelligence(articles, query);
+
+      // 6. Store analysis in Supabase
+      await supabase
+        .from('llm_analysis')
+        .insert({
+          session_id: sessionId,
+          analysis_type: intelligence.queryType,
+          llm_response: intelligence.analysis,
+          confidence_score: intelligence.confidence
+        });
+
+      // 7. Update session status
+      await supabase
+        .from('research_sessions')
+        .update({
+          session_status: 'completed',
+          completed_at: new Date().toISOString(),
+          total_sources: articles.length
+        })
+        .eq('id', sessionId);
+
+      // 8. Return comprehensive results
+      res.json({
+        sessionId,
+        originalQuery: query,
+        enhancedQuery: enhancedQuery.enhanced,
+        intelligence: intelligence.analysis,
+        structuredIntelligence: intelligence.structuredAnalysis,
+        queryType: intelligence.queryType,
+        borogueContext: intelligence.borogueContext,
+        confidence: intelligence.confidence,
+        totalSources: articles.length,
+        articles: articles.slice(0, 10), // Return top 10 for UI
+        topSources: intelligence.topSources,
+        financialImpact: intelligence.financialImpact,
+        strategicRecommendations: intelligence.strategicRecommendations,
+        criticalFindings: intelligence.criticalFindings,
+        remainingRequests: this.analysisService.getRemainingRequests(),
+        processingTime: new Date() - new Date(sessionData.started_at)
+      });
+
+    } catch (error) {
+      console.error('Research error:', error);
+      
+      // Update session with error status if session was created
+      if (sessionId) {
+        await supabase
+          .from('research_sessions')
+          .update({ session_status: 'error' })
+          .eq('id', sessionId);
+      }
+      
+      res.status(500).json({ 
+        error: 'Research processing failed',
+        details: error.message,
+        remainingRequests: this.analysisService.getRemainingRequests()
+      });
+    }
+  }
+
+  async getResearchHistory(req, res) {
+    const { userId } = req.params;
+    
+    try {
+      const { data: sessions, error } = await supabase
+        .from('research_sessions')
+        .select(`
+          id,
+          original_query,
+          enhanced_query,
+          session_status,
+          started_at,
+          completed_at,
+          total_sources
+        `)
+        .eq('user_id', userId)
+        .order('started_at', { ascending: false })
+        .limit(20);
+
+      if (error) throw error;
+
+      res.json({ sessions });
+    } catch (error) {
+      console.error('History fetch error:', error);
+      res.status(500).json({ error: 'Failed to fetch research history' });
+    }
+  }
+
+  async getSessionDetails(req, res) {
+    const { sessionId } = req.params;
+    
+    try {
+      // Get session details
+      const { data: session, error: sessionError } = await supabase
+        .from('research_sessions')
+        .select('*')
+        .eq('id', sessionId)
+        .single();
+
+      if (sessionError) throw sessionError;
+
+      // Get articles for this session
+      const { data: articles, error: articlesError } = await supabase
+        .from('news_sources')
+        .select('*')
+        .eq('session_id', sessionId)
+        .order('relevance_score', { ascending: false });
+
+      if (articlesError) throw articlesError;
+
+      // Get analysis for this session
+      const { data: analysis, error: analysisError } = await supabase
+        .from('llm_analysis')
+        .select('*')
+        .eq('session_id', sessionId)
+        .order('created_at', { ascending: false });
+
+      if (analysisError) throw analysisError;
+
+      res.json({
+        session,
+        articles,
+        analysis: analysis[0] || null, // Most recent analysis
+        totalSources: articles.length
+      });
+    } catch (error) {
+      console.error('Session details error:', error);
+      res.status(500).json({ error: 'Failed to fetch session details' });
+    }
+  }
+
+  // New endpoint for API status
+  async getApiStatus(req, res) {
+    try {
+      const status = {
+        gemini: {
+          remainingRequests: this.analysisService.getRemainingRequests(),
+          dailyLimit: 50
+        },
+        gnews: {
+          remainingRequests: Math.max(0, 80 - this.newsService.dailyRequestCount.gnews),
+          dailyLimit: 100
+        },
+        newsapi: {
+          remainingRequests: Math.max(0, 900 - this.newsService.dailyRequestCount.newsapi),
+          dailyLimit: 1000
+        }
+      };
+
+      res.json({ status });
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to get API status' });
+    }
+  }
+}
+
+module.exports = ResearchController;
+```
+
+### 8. Updated API Routes (Supabase Compatible)
+
+```javascript
+// backend/src/routes/research.js
+const express = require('express');
+const ResearchController = require('../controllers/researchController');
+const supabase = require('../config/supabase');
+
+const router = express.Router();
+const researchController = new ResearchController();
+
+// Middleware to verify user authentication (optional for MVP)
+const authenticateUser = async (req, res, next) => {
+  try {
+    const token = req.headers.authorization?.replace('Bearer ', '');
+    
+    if (!token) {
+      // For MVP, create a default user
+      req.user = { id: 'default-user-id' };
+      return next();
+    }
+
+    const { data: { user }, error } = await supabase.auth.getUser(token);
+    
+    if (error || !user) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+    
+    req.user = user;
+    next();
+  } catch (error) {
+    console.error('Auth error:', error);
+    res.status(401).json({ error: 'Authentication failed' });
+  }
+};
+
+// POST /api/research - Conduct new research
+router.post('/', authenticateUser, async (req, res) => {
+  req.body.userId = req.user.id;
+  await researchController.conductResearch(req, res);
+});
+
+// GET /api/research/history/:userId - Get research history
+router.get('/history/:userId', authenticateUser, async (req, res) => {
+  await researchController.getResearchHistory(req, res);
+});
+
+// GET /api/research/session/:sessionId - Get specific session details
+router.get('/session/:sessionId', authenticateUser, async (req, res) => {
+  await researchController.getSessionDetails(req, res);
+});
+
+// GET /api/research/status - Get API usage status
+router.get('/status', async (req, res) => {
+  await researchController.getApiStatus(req, res);
+});
+
+// POST /api/research/feedback - User feedback for learning
+router.post('/feedback', authenticateUser, async (req, res) => {
+  try {
+    const { sessionId, rating, feedback } = req.body;
+    
+    const { error } = await supabase
+      .from('query_enhancements')
+      .insert({
+        original_query: req.body.originalQuery,
+        enhanced_query: req.body.enhancedQuery,
+        success_score: rating,
+        user_feedback: feedback
+      });
+
+    if (error) throw error;
+
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Feedback error:', error);
+    res.status(500).json({ error: 'Failed to store feedback' });
+  }
+});
+
+module.exports = router;
+```
+
+### 9. Package.json Dependencies
+
+```json
+{
+  "name": "borouge-research-backend",
+  "version": "1.0.0",
+  "description": "Borouge ESG Intelligence Research System",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js",
+    "test": "jest"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "helmet": "^7.0.0",
+    "morgan": "^1.10.0",
+    "dotenv": "^16.3.1",
+    "@supabase/supabase-js": "^2.38.0",
+    "@google/generative-ai": "^0.2.1",
+    "axios": "^1.5.0",
+    "express-rate-limit": "^6.10.0",
+    "compression": "^1.7.4"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1",
+    "jest": "^29.7.0"
+  }
+}
+```
+
+### 10. Environment Variables (.env)
+
+```env
+# Supabase Configuration
+SUPABASE_URL=your_supabase_project_url
+SUPABASE_ANON_KEY=your_supabase_anon_key
+SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key
+
+# AI Services
+GEMINI_API_KEY=your_gemini_api_key
+
+# News APIs
+GNEWS_API_KEY=your_gnews_api_key
+NEWSAPI_KEY=your_newsapi_key_optional
+
+# Server Configuration
+PORT=3001
+NODE_ENV=development
+
+
+
+### 11. Updated Frontend Components (Borouge-specific)
+
+```jsx
+// frontend/src/components/BorogueSearchInterface.jsx
+import React, { useState, useEffect } from 'react';
+import axios from 'axios';
+
+const BorogueSearchInterface = () => {
+  const [query, setQuery] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [results, setResults] = useState(null);
+  const [error, setError] = useState(null);
+  const [apiStatus, setApiStatus] = useState(null);
+
+  // Load API status on component mount
+  useEffect(() => {
+    fetchApiStatus();
+  }, []);
+
+  const fetchApiStatus = async () => {
+    try {
+      const response = await axios.get('/api/research/status');
+      setApiStatus(response.data.status);
+    } catch (err) {
+      console.error('Failed to fetch API status:', err);
+    }
+  };
+
+  const handleSearch = async (e) => {
+    e.preventDefault();
+    if (!query.trim()) return;
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      const response = await axios.post('/api/research', {
+        query,
+        userId: 'default-user-id' // For MVP
+      });
+
+      setResults(response.data);
+      await fetchApiStatus(); // Update API status after request
+    } catch (err) {
+      if (err.response?.status === 429) {
+        setError('Daily analysis limit reached. Please try again tomorrow.');
+      } else {
+        setError('Research failed. Please try again.');
+      }
+      console.error('Search error:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const getQueryTypeIcon = (type) => {
+    const icons = {
+      regulatory_intelligence: '📋',
+      competitive_intelligence: '🏢',
+      market_analysis: '📊',
+      esg_analysis: '🌱',
+      general_intelligence: '🔍'
+    };
+    return icons[type] || '🔍';
+  };
+
+  const getQueryTypeLabel = (type) => {
+    const labels = {
+      regulatory_intelligence: 'Regulatory Intelligence',
+      competitive_intelligence: 'Competitive Intelligence', 
+      market_analysis: 'Market Analysis',
+      esg_analysis: 'ESG Analysis',
+      general_intelligence: 'General Intelligence'
+    };
+    return labels[type] || 'General Intelligence';
+  };
+
+  return (
+    <div className="max-w-6xl mx-auto p-6 bg-gray-50 min-h-screen">
+      <div className="bg-white shadow-lg rounded-lg p-8 mb-6">
+        <div className="flex items-center justify-between mb-6">
+          <div>
+            <h1 className="text-3xl font-bold text-blue-900 mb-2">
+              Borouge ESG Intelligence
+            </h1>
+            <p className="text-gray-600">Strategic research intelligence for the petrochemical industry</p>
+          </div>
+          
+          {apiStatus && (
+            <div className="bg-blue-50 p-4 rounded-lg">
+              <h3 className="text-sm font-semibold text-blue-800 mb-2">API Status</h3>
+              <div className="text-xs text-blue-600 space-y-1">
+                <div>Gemini: {apiStatus.gemini.remainingRequests}/{apiStatus.gemini.dailyLimit}</div>
+                <div>GNews: {apiStatus.gnews.remainingRequests}/{apiStatus.gnews.dailyLimit}</div>
+              </div>
+            </div>
+          )}
+        </div>
+        
+        <form onSubmit={handleSearch} className="mb-8">
+          <div className="flex gap-4">
+            <input
+              type="text"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Enter your research query (e.g., plastic policies europe, CBAM carbon border adjustment)"
+              className="flex-1 px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-lg"
+              disabled={loading}
+            />
+            <button
+              type="submit"
+              disabled={loading || !query.trim() || (apiStatus?.gemini.remainingRequests <= 0)}
+              className="px-8 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed font-semibold"
+            >
+              {loading ? 'Analyzing...' : 'Research'}
+            </button>
+          </div>
+          
+          {apiStatus?.gemini.remainingRequests <= 0 && (
+            <p className="text-red-600 text-sm mt-2">
+              Daily analysis limit reached. Please try again tomorrow.
+            </p>
+          )}
+        </form>
+
+        {error && (
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded mb-6">
+            {error}
+          </div>
+        )}
+
+        {loading && (
+          <div className="text-center py-12">
+            <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-600 mx-auto"></div>
+            <p className="mt-6 text-gray-600 text-lg">Analyzing industry sources with AI...</p>
+            <div className="mt-4 space-y-2 text-sm text-gray-500">
+              <p>• Searching petrochemical industry sources</p>
+              <p>• Applying Borouge business context</p>
+              <p>• Generating strategic intelligence</p>
+            </div>
+          </div>
+        )}
+
+        {results && <BorogueResultsDisplay results={results} />}
+      </div>
+    </div>
+  );
+};
+
+const BorogueResultsDisplay = ({ results }) => {
+  const [selectedTab, setSelectedTab] = useState('executive');
+
+  return (
+    <div className="space-y-6">
+      {/* Summary Header */}
+      <div className="bg-gradient-to-r from-blue-50 to-green-50 p-6 rounded-lg border border-blue-200">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center space-x-3">
+            <span className="text-2xl">{getQueryTypeIcon(results.queryType)}</span>
+            <div>
+              <h3 className="text-xl font-bold text-blue-900">
+                {getQueryTypeLabel(results.queryType)}
+              </h3>
+              <p className="text-blue-700">Query: "{results.originalQuery}"</p>
+            </div>
+          </div>
+          
+          <div className="text-right text-sm text-blue-600">
+            <div>Sources: {results.totalSources}</div>
+            <div>Confidence: {Math.round(results.confidence * 100)}%</div>
+            <div>Processing: {results.processingTime}ms</div>
+          </div>
+        </div>
+        
+        {/* Executive Summary */}
+        {results.structuredIntelligence?.executiveSummary && (
+          <div className="bg-white p-4 rounded border border-blue-100">
+            <h4 className="font-semibold text-gray-800 mb-2 flex items-center">
+              <span className="text-lg mr-2">🎯</span>
+              Executive Summary
+            </h4>
+            <p className="text-gray-700 text-sm leading-relaxed">
+              {results.structuredIntelligence.executiveSummary}
+            </p>
+          </div>
+        )}
+      </div>
+
+      {/* Tab Navigation */}
+      <div className="flex space-x-1 bg-gray-100 p-1 rounded-lg">
+        {[
+          { id: 'executive', label: 'Executive Overview' },
+          { id: 'findings', label: 'Critical Findings' },
+          { id: 'financial', label: 'Financial Impact' },
+          { id: 'strategic', label: 'Strategic Actions' },
+          { id: 'competitive', label: 'Competitive Intel' },
+          { id: 'sources', label: 'Sources' }
+        ].map(tab => (
+          <button
+            key={tab.id}
+            onClick={() => setSelectedTab(tab.id)}
+            className={`flex-1 py-2 px-3 rounded-md font-medium transition-colors text-sm ${
+              selectedTab === tab.id
+                ? 'bg-white text-blue-600 shadow-sm'
+                : 'text-gray-600 hover:text-gray-900'
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Tab Content */}
+      {selectedTab === 'executive' && (
+        <div className="space-y-4">
+          {/* Enhanced Query */}
+          <div className="bg-gray-50 p-4 rounded-lg">
+            <h4 className="font-semibold text-gray-800 mb-2">Enhanced Query Analysis</h4>
+            <p className="text-gray-600 text-sm">{results.enhancedQuery}</p>
+          </div>
+
+          {/* Quick Metrics */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="bg-white p-4 rounded border border-gray-200">
+              <h5 className="font-semibold text-gray-800 mb-1">Risk Level</h5>
+              <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                results.borogueContext?.riskLevel === 'HIGH' ? 'bg-red-100 text-red-800' :
+                results.borogueContext?.riskLevel === 'MEDIUM' ? 'bg-yellow-100 text-yellow-800' :
+                'bg-green-100 text-green-800'
+              }`}>
+                {results.borogueContext?.riskLevel || 'MEDIUM'}
+              </span>
+            </div>
+            
+            <div className="bg-white p-4 rounded border border-gray-200">
+              <h5 className="font-semibold text-gray-800 mb-1">Priority Findings</h5>
+              <p className="text-sm text-gray-600">
+                {results.borogueContext?.priorityFindings?.length || 0} high-priority items
+              </p>
+            </div>
+            
+            <div className="bg-white p-4 rounded border border-gray-200">
+              <h5 className="font-semibold text-gray-800 mb-1">Action Items</h5>
+              <p className="text-sm text-gray-600">
+                {results.strategicRecommendations?.length || 0} strategic actions
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {selectedTab === 'findings' && results.criticalFindings && (
+        <div className="space-y-4">
+          <h3 className="text-lg font-semibold text-gray-800">Critical Findings</h3>
+          {results.criticalFindings.map((finding, index) => (
+            <div key={index} className="bg-white border rounded-lg p-6 shadow-sm">
+              <div className="flex justify-between items-start mb-3">
+                <h4 className="font-semibold text-lg text-gray-900">{finding.title}</h4>
+                <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                  finding.priority === 'HIGH' ? 'bg-red-100 text-red-800' :
+                  finding.priority === 'MEDIUM' ? 'bg-yellow-100 text-yellow-800' :
+                  'bg-green-100 text-green-800'
+                }`}>
+                  {finding.priority}
+                </span>
+              </div>
+              
+              <div className="space-y-3 text-sm">
+                <div>
+                  <h5 className="font-medium text-gray-800 mb-1">Analysis:</h5>
+                  <p className="text-gray-600">{finding.description}</p>
+                </div>
+                
+                <div>
+                  <h5 className="font-medium text-gray-800 mb-1">Borouge Impact:</h5>
+                  <p className="text-blue-700">{finding.borogueSpecificImpact}</p>
+                </div>
+                
+                <div>
+                  <h5 className="font-medium text-gray-800 mb-1">Competitive Implication:</h5>
+                  <p className="text-purple-700">{finding.competitiveImplication}</p>
+                </div>
+                
+                <div className="bg-gray-50 p-3 rounded">
+                  <h5 className="font-medium text-gray-800 mb-1">Required Action:</h5>
+                  <p className="text-orange-700">{finding.actionRequired}</p>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {selectedTab === 'financial' && results.financialImpact && (
+        <div className="space-y-4">
+          <h3 className="text-lg font-semibold text-gray-800">Financial Impact Analysis</h3>
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="bg-white border rounded-lg p-6">
+              <h4 className="font-semibold text-gray-800 mb-3 flex items-center">
+                <span className="text-lg mr-2">📊</span>
+                Revenue Exposure Timeline
+              </h4>
+              
+              <div className="space-y-3">
+                <div className="border-l-4 border-red-400 pl-3">
+                  <h5 className="font-medium text-red-800">Short-term (0-2 years)</h5>
+                  <p className="text-sm text-gray-600">{results.financialImpact.shortTerm}</p>
+                </div>
+                
+                <div className="border-l-4 border-yellow-400 pl-3">
+                  <h5 className="font-medium text-yellow-800">Medium-term (2-5 years)</h5>
+                  <p className="text-sm text-gray-600">{results.financialImpact.mediumTerm}</p>
+                </div>
+                
+                <div className="border-l-4 border-green-400 pl-3">
+                  <h5 className="font-medium text-green-800">Long-term (5-10 years)</h5>
+                  <p className="text-sm text-gray-600">{results.financialImpact.longTerm}</p>
+                </div>
+              </div>
+            </div>
+            
+            <div className="bg-white border rounded-lg p-6">
+              <h4 className="font-semibold text-gray-800 mb-3 flex items-center">
+                <span className="text-lg mr-2">💰</span>
+                Investment Requirements
+              </h4>
+              <div className="bg-blue-50 p-4 rounded">
+                <p className="text-blue-800 font-medium">{results.financialImpact.investmentRequired}</p>
+              </div>
+              
+              {results.borogueContext?.financialExposure && (
+                <div className="mt-4 space-y-2">
+                  <h5 className="font-medium text-gray-800">Key Exposures:</h5>
+                  <div className="text-sm space-y-1 text-gray-600">
+                    <div>• EU Market: €2.3B revenue exposure</div>
+                    <div>• Asian Market: $1.8B revenue exposure</div>
+                    <div>• Production Capacity: 5M tonnes annually</div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {selectedTab === 'strategic' && results.strategicRecommendations && (
+        <div className="space-y-4">
+          <h3 className="text-lg font-semibold text-gray-800">Strategic Action Plan</h3>
+          
+          <div className="space-y-4">
+            {results.strategicRecommendations.map((recommendation, index) => (
+              <div key={index} className="bg-white border rounded-lg p-4 hover:shadow-md transition-shadow">
+                <div className="flex items-start space-x-3">
+                  <div className="bg-blue-100 rounded-full p-2 mt-1">
+                    <span className="text-blue-600 font-semibold text-sm">{index + 1}</span>
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-gray-700">{recommendation}</p>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+          
+          {results.structuredIntelligence?.monitoringRequirements && (
+            <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+              <h4 className="font-semibold text-yellow-800 mb-2 flex items-center">
+                <span className="text-lg mr-2">📋</span>
+                Monitoring Requirements
+              </h4>
+              <p className="text-yellow-700 text-sm">{results.structuredIntelligence.monitoringRequirements}</p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {selectedTab === 'competitive' && (
+        <div className="space-y-4">
+          <h3 className="text-lg font-semibold text-gray-800">Competitive Intelligence</h3>
+          
+          <div className="bg-white border rounded-lg p-6">
+            <h4 className="font-semibold text-gray-800 mb-3 flex items-center">
+              <span className="text-lg mr-2">🏢</span>
+              Competitive Benchmarking
+            </h4>
+            
+            {results.structuredIntelligence?.competitiveBenchmarking ? (
+              <div className="prose max-w-none">
+                <p className="text-gray-700 text-sm leading-relaxed">
+                  {results.structuredIntelligence.competitiveBenchmarking}
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="bg-red-50 p-4 rounded border border-red-200">
+                  <h5 className="font-semibold text-red-800 mb-2">SABIC</h5>
+                  <p className="text-red-700 text-sm">Similar UAE context, $35B revenue</p>
+                </div>
+                
+                <div className="bg-blue-50 p-4 rounded border border-blue-200">
+                  <h5 className="font-semibold text-blue-800 mb-2">Dow Chemical</h5>
+                  <p className="text-blue-700 text-sm">Global leader, $57B revenue</p>
+                </div>
+                
+                <div className="bg-green-50 p-4 rounded border border-green-200">
+                  <h5 className="font-semibold text-green-800 mb-2">ExxonMobil</h5>
+                  <p className="text-green-700 text-sm">Chemical segment, $15B revenue</p>
+                </div>
+              </div>
+            )}
+            
+            {results.structuredIntelligence?.riskOpportunityMatrix && (
+              <div className="mt-4 bg-gray-50 p-4 rounded">
+                <h5 className="font-medium text-gray-800 mb-2">Risk-Opportunity Matrix:</h5>
+                <p className="text-gray-600 text-sm">{results.structuredIntelligence.riskOpportunityMatrix}</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {selectedTab === 'sources' && (
+        <div>
+          <h3 className="text-lg font-semibold text-gray-800 mb-4">Source Analysis</h3>
+          <div className="space-y-3">
+            {results.topSources.map((source, index) => (
+              <div key={index} className="border border-gray-200 p-4 rounded bg-white hover:shadow-md transition-shadow">
+                <div className="flex justify-between items-start mb-2">
+                  <h4 className="font-medium text-blue-600 hover:underline">
+                    <a href={source.url} target="_blank" rel="noopener noreferrer">
+                      {source.title}
+                    </a>
+                  </h4>
+                  <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">
+                    {Math.round(source.relevanceScore * 100)}% relevant
+                  </span>
+                </div>
+                <p className="text-sm text-gray-600">{source.source}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Action Buttons */}
+      <div className="flex flex-wrap gap-3 pt-4 border-t border-gray-200">
+        <button className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 text-sm">
+          📄 Download PDF Report
+        </button>
+        <button className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 text-sm">
+          📊 Export to Excel
+        </button>
+        <button className="bg-purple-600 text-white px-4 py-2 rounded hover:bg-purple-700 text-sm">
+          📧 Share with Team
+        </button>
+        <button className="bg-orange-600 text-white px-4 py-2 rounded hover:bg-orange-700 text-sm">
+          🔔 Set Up Alert
+        </button>
+        <button className="bg-gray-600 text-white px-4 py-2 rounded hover:bg-gray-700 text-sm">
+          💾 Save Research
+        </button>
+      </div>
+    </div>
+  );
+};
+
+// Helper functions
+const getQueryTypeIcon = (type) => {
+  const icons = {
+    regulatory_intelligence: '📋',
+    competitive_intelligence: '🏢',
+    market_analysis: '📊',
+    esg_analysis: '🌱',
+    general_intelligence: '🔍'
+  };
+  return icons[type] || '🔍';
+};
+
+const getQueryTypeLabel = (type) => {
+  const labels = {
+    regulatory_intelligence: 'Regulatory Intelligence',
+    competitive_intelligence: 'Competitive Intelligence', 
+    market_analysis: 'Market Analysis',
+    esg_analysis: 'ESG Analysis',
+    general_intelligence: 'General Intelligence'
+  };
+  return labels[type] || 'General Intelligence';
+};
+
+export default BorogueSearchInterface;
+```
+
+### 12. Main Server File
+
+```javascript
+// backend/server.js
+const express = require('express');
+const cors = require('cors');
+const helmet = require('helmet');
+const morgan = require('morgan');
+const compression = require('compression');
+const rateLimit = require('express-rate-limit');
+require('dotenv').config();
+
+const researchRoutes = require('./src/routes/research');
+
+const app = express();
+const PORT = process.env.PORT || 3001;
+
+// Security middleware
+app.use(helmet());
+app.use(compression());
+
+// CORS configuration
+app.use(cors({
+  origin: process.env.NODE_ENV === 'production' 
+    ? ['https://your-frontend-domain.com'] 
+    : ['http://localhost:3000'],
+  credentials: true
+}));
+
+// Rate limiting
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // Limit each IP to 100 requests per windowMs
+  message: 'Too many requests from this IP, please try again later.'
+});
+app.use(limiter);
+
+// Specific rate limiting for research endpoint
+const researchLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 10, // Limit each IP to 10 research requests per hour
+  message: 'Research rate limit exceeded. Please try again in an hour.'
+});
+
+// Body parsing middleware
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true }));
+
+// Logging
+app.use(morgan('combined'));
+
+// Health check endpoint
+app.get('/health', (req, res) => {
+  res.json({ 
+    status: 'healthy', 
+    timestamp: new Date().toISOString(),
+    version: '1.0.0'
+  });
+});
+
+// API routes
+app.use('/api/research', researchLimiter, researchRoutes);
+
+// 404 handler
+app.use('*', (req, res) => {
+  res.status(404).json({ error: 'Route not found' });
+});
+
+// Global error handler
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  res.status(500).json({ 
+    error: 'Something went wrong!',
+    message: process.env.NODE_ENV === 'development' ? err.message : 'Internal server error'
+  });
+});
+
+// Start server
+app.listen(PORT, () => {
+  console.log(`🚀 Borouge Research API running on port ${PORT}`);
+  console.log(`📊 Environment: ${process.env.NODE_ENV}`);
+  console.log(`🔗 Health check: http://localhost:${PORT}/health`);
+});
+
+module.exports = app;
+```
+
+### 13. Frontend Package.json
+
+```json
+{
+  "name": "borouge-research-frontend",
+  "version": "1.0.0",
+  "description": "Borouge ESG Intelligence Frontend",
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "react-scripts": "5.0.1",
+    "axios": "^1.5.0",
+    "@supabase/supabase-js": "^2.38.0",
+    "tailwindcss": "^3.3.0",
+    "autoprefixer": "^10.4.16",
+    "postcss": "^8.4.31"
+  },
+  "scripts": {
+    "start": "react-scripts start",
+    "build": "react-scripts build",
+    "test": "react-scripts test",
+    "eject": "react-scripts eject"
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  }
+}
+```
+
+## 🚀 DEPLOYMENT INSTRUCTIONS
+
+### **Step 1: Supabase Setup**
+1. Go to [supabase.com](https://supabase.com) and create a new project
+2. Run the SQL from "Supabase Database Setup" in the SQL Editor
+3. Copy your project URL and keys to your `.env` file
+
+### **Step 2: API Keys Setup**
+1. **Gemini API**: Go to [ai.google.dev](https://ai.google.dev), create project, get API key
+2. **GNews API**: Sign up at [gnews.io](https://gnews.io), get free API key (100 requests/day)
+3. **NewsAPI (Optional)**: Sign up at [newsapi.org](https://newsapi.org) for additional sources
+
+### **Step 3: Local Development**
+```bash
+# Backend
+cd backend
+npm install
+cp .env.example .env  # Add your API keys
+npm run dev
+
+# Frontend
+cd frontend
+npm install
+npm start
+```
+
+### **Step 4: Free Deployment Options**
+
+**Backend (Choose One):**
+- **Railway**: Connect GitHub repo, auto-deploy, includes database
+- **Render**: Free tier with 750 hours/month
+- **Vercel**: For Node.js APIs, serverless functions
+
+**Frontend:**
+- **Vercel**: Connect GitHub repo, auto-deploy
+- **Netlify**: Drag & drop or GitHub integration
+
+### **Step 5: Production Environment Variables**
+```env
+# Production .env
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_ANON_KEY=your_anon_key
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
+GEMINI_API_KEY=your_gemini_key
+GNEWS_API_KEY=your_gnews_key
+NODE_ENV=production
+```
+
+## 💡 KEY FEATURES IMPLEMENTED
+
+### **Free Tier Optimizations:**
+- ✅ Supabase free database (500MB, up to 50MB/month bandwidth)
+- ✅ Gemini API free tier (15 RPM, rate limiting implemented)
+- ✅ GNews free tier (100 requests/day, smart usage)
+- ✅ Borouge-specific query enhancement
+- ✅ ESG intelligence analysis with business context
+- ✅ Real-time API status monitoring
+- ✅ Error handling and rate limiting
+
+### **Borouge-Specific Intelligence:**
+- ✅ Petrochemical industry context
+- ✅ EU market exposure analysis (€2.3B)
+- ✅ Competitive positioning vs SABIC, Dow, ExxonMobil
+- ✅ ESG and regulatory impact assessment
+- ✅ Financial quantification with business impact
+- ✅ Strategic recommendations with timelines
+
+
+
+Sample Flow Example:
+Query: "CBAM impact on polyethylene exports"
+                    ↓ 
+Enhanced: "carbon border adjustment CBAM polyethylene EU exports Borouge SABIC polymer"
+                    ↓ 
+Sources: 15 relevant articles from Chemical Week, ICIS, Reuters
+                    ↓ 
+Intelligence: "€460M annual compliance risk, $25M infrastructure investment required"
+                    ↓ 
+Dashboard: Executive summary + 5 critical findings + strategic action plan
