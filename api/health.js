@@ -61,29 +61,33 @@ router.get('/', async (req, res) => {
       };
     }
 
-    // Check GNews.io connection
-    try {
-      const response = await axios.get('https://gnews.io/api/v4/search', {
-        params: {
-          q: 'sustainability',
-          token: process.env.GNEWS_API_KEY,
-          lang: 'en',
-          max: 1
-        },
-        timeout: 5000
-      });
+    // Check Enterprise News APIs
+    const newsApiChecks = [
+      { name: 'gnews', url: 'https://gnews.io/api/v4/search', params: { q: 'test', token: process.env.GNEWS_API_KEY, max: 1 } },
+      { name: 'newsapi', url: 'https://newsapi.org/v2/everything', params: { q: 'test', apiKey: process.env.NEWSAPI_ORG_KEY, pageSize: 1 } },
+      { name: 'guardian', url: 'https://content.guardianapis.com/search', params: { q: 'test', 'api-key': process.env.GUARDIAN_API_KEY, 'page-size': 1 } },
+      { name: 'newsdata', url: 'https://newsdata.io/api/1/news', params: { apikey: process.env.NEWSDATA_IO_KEY, q: 'test', size: 1 } }
+    ];
 
-      healthCheck.services.gnews = {
-        status: response.status === 200 ? 'healthy' : 'unhealthy',
-        message: response.status === 200 ? 'Connected successfully' : 'Connection failed',
-        responseTime: Date.now()
-      };
-    } catch (newsApiError) {
-      healthCheck.services.gnews = {
-        status: 'unhealthy',
-        message: newsApiError.message,
-        responseTime: Date.now()
-      };
+    for (const api of newsApiChecks) {
+      try {
+        const response = await axios.get(api.url, {
+          params: api.params,
+          timeout: 5000
+        });
+
+        healthCheck.services[api.name] = {
+          status: response.status === 200 ? 'healthy' : 'unhealthy',
+          message: response.status === 200 ? 'Connected successfully' : 'Connection failed',
+          responseTime: Date.now()
+        };
+      } catch (error) {
+        healthCheck.services[api.name] = {
+          status: 'unhealthy',
+          message: error.message,
+          responseTime: Date.now()
+        };
+      }
     }
 
     // Determine overall health

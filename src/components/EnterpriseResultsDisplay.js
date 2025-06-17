@@ -429,8 +429,31 @@ const EnterpriseResultsDisplay = ({ results, onBack }) => {
               <div className="space-y-6">
                 <div className="premium-card p-6">
                   <h2 className="text-2xl font-bold text-gray-900 mb-6">News Sources Analysis</h2>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+                    <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
+                      <h3 className="font-semibold text-blue-900 mb-2">Total Articles Found</h3>
+                      <div className="text-2xl font-bold text-blue-700">
+                        {results?.newsResults?.rawArticleCount || 0}
+                      </div>
+                      <p className="text-sm text-blue-600">Raw articles collected</p>
+                    </div>
+                    <div className="bg-green-50 p-4 rounded-lg border border-green-200">
+                      <h3 className="font-semibold text-green-900 mb-2">High-Quality Articles</h3>
+                      <div className="text-2xl font-bold text-green-700">
+                        {results?.newsResults?.finalArticleCount || totalSources}
+                      </div>
+                      <p className="text-sm text-green-600">After enterprise filtering</p>
+                    </div>
+                    <div className="bg-purple-50 p-4 rounded-lg border border-purple-200">
+                      <h3 className="font-semibold text-purple-900 mb-2">Source Diversity</h3>
+                      <div className="text-2xl font-bold text-purple-700">
+                        {results?.newsResults?.sourceStatistics?.uniqueSourcesUsed || 0}/{results?.newsResults?.totalSources || 5}
+                      </div>
+                      <p className="text-sm text-purple-600">Active news sources</p>
+                    </div>
+                  </div>
                   <p className="text-gray-600 mb-6">
-                    Analysis based on {totalSources} sources from leading industry publications and news outlets.
+                    Enterprise-grade analysis from {results?.newsResults?.sourceStatistics?.uniqueSourcesUsed || totalSources} premium news sources with {((results?.newsResults?.qualityScore || 0) * 100).toFixed(1)}% quality score.
                   </p>
                 </div>
 

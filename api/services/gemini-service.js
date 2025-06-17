@@ -8,7 +8,7 @@ class GeminiService {
     this.model = this.genAI.getGenerativeModel({
       model: "gemini-1.5-flash",
       generationConfig: {
-        maxOutputTokens: 8192, // Maximum output tokens for comprehensive analysis
+        maxOutputTokens: parseInt(process.env.GEMINI_MAX_TOKENS) || 16384, // Enhanced for enterprise
         temperature: 0.1, // Low temperature for consistent, factual analysis
         topP: 0.8,
         topK: 40
@@ -18,7 +18,8 @@ class GeminiService {
     this.requestCount = 0;
     this.maxDailyRequests = 1500; // Optimized for Gemini 1.5 Flash free tier
     this.maxInputTokens = 32000; // Maximum input tokens per request
-    this.maxOutputTokens = 8192; // Maximum output tokens per request
+    this.maxOutputTokens = parseInt(process.env.GEMINI_MAX_TOKENS) || 16384; // Enhanced for enterprise
+    this.enterpriseMode = process.env.ANALYSIS_DEPTH === 'enterprise';
   }
 
   /**
@@ -139,14 +140,29 @@ class GeminiService {
   }
 
   /**
-   * Assess risk level from critical findings
+   * Enhanced risk assessment with comprehensive analysis
    */
   assessRiskLevel(criticalFindings) {
-    const highPriorityCount = criticalFindings.filter(f => f.priority === 'HIGH').length;
-    const mediumPriorityCount = criticalFindings.filter(f => f.priority === 'MEDIUM').length;
-    
+    if (!criticalFindings || criticalFindings.length === 0) {
+      return 'LOW';
+    }
+
+    // Count findings by priority
+    const highPriorityCount = criticalFindings.filter(f =>
+      f.priority === 'HIGH' || f.priority === 'CRITICAL'
+    ).length;
+    const mediumPriorityCount = criticalFindings.filter(f =>
+      f.priority === 'MEDIUM' || f.priority === 'MODERATE'
+    ).length;
+    const totalFindings = criticalFindings.length;
+
+    // Enhanced risk assessment logic
+    if (highPriorityCount >= 3) return 'CRITICAL';
     if (highPriorityCount >= 2) return 'HIGH';
-    if (highPriorityCount >= 1 || mediumPriorityCount >= 3) return 'MEDIUM';
+    if (highPriorityCount >= 1 || mediumPriorityCount >= 4) return 'HIGH';
+    if (mediumPriorityCount >= 2 || totalFindings >= 5) return 'MEDIUM';
+    if (totalFindings >= 2) return 'MEDIUM';
+
     return 'LOW';
   }
 

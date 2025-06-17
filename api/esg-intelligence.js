@@ -1,6 +1,7 @@
 // Borouge ESG Intelligence API Endpoint
 const express = require('express');
 const NewsService = require('./services/news-service');
+const EnterpriseNewsOrchestrator = require('./services/enterprise-news-orchestrator');
 const GeminiService = require('./services/gemini-service');
 const SupabaseService = require('./services/supabase-service');
 
@@ -8,6 +9,7 @@ const router = express.Router();
 
 // Initialize services
 const newsService = new NewsService();
+const enterpriseNewsOrchestrator = new EnterpriseNewsOrchestrator();
 const geminiService = new GeminiService();
 const supabaseService = new SupabaseService();
 
@@ -74,12 +76,18 @@ router.post('/analyze', async (req, res) => {
       sessionId = 'temp-' + Date.now();
     }
 
-    // 2. Search for news articles
-    console.log('Searching for REAL news articles...');
-    const newsResults = await newsService.searchNews(query, { limit: 20 });
+    // 2. Enterprise Multi-Source News Search
+    console.log('🏢 Starting Enterprise News Search...');
+    const newsResults = await enterpriseNewsOrchestrator.searchEnterpriseNews(query, {
+      targetArticles: parseInt(process.env.TARGET_ARTICLES_PER_QUERY) || 18
+    });
     const articles = newsResults.articles;
 
-    console.log(`Found ${articles.length} relevant articles`);
+    console.log(`✅ Enterprise search completed: ${articles.length} high-quality articles`);
+    console.log(`📊 Quality Score: ${(newsResults.qualityScore * 100).toFixed(1)}%`);
+    console.log(`🎯 Enterprise Grade: ${newsResults.enterpriseGrade ? 'YES' : 'NO'}`);
+    console.log(`📈 Source Diversity: ${newsResults.sourceStatistics?.uniqueSourcesUsed}/${newsResults.totalSources} sources`);
+    console.log(`🔍 Raw → Final: ${newsResults.rawArticleCount} → ${newsResults.finalArticleCount} articles`);
 
     // Check if we have enough articles for analysis
     if (articles.length < 1) {
@@ -140,7 +148,7 @@ router.post('/analyze', async (req, res) => {
       console.log('Supabase unavailable, skipping usage tracking');
     }
 
-    // 8. Return comprehensive results
+    // 8. Return comprehensive results with enhanced news statistics
     const response = {
       sessionId: sessionId,
       originalQuery: query,
@@ -158,6 +166,17 @@ router.post('/analyze', async (req, res) => {
       totalSources: articles.length,
       topSources: intelligence.topSources,
       borogueContext: intelligence.borogueContext,
+      newsResults: {
+        totalSources: newsResults.totalSources,
+        sourceBreakdown: newsResults.sourceBreakdown,
+        sourceStatistics: newsResults.sourceStatistics,
+        qualityScore: newsResults.qualityScore,
+        enterpriseGrade: newsResults.enterpriseGrade,
+        rawArticleCount: newsResults.rawArticleCount,
+        finalArticleCount: newsResults.finalArticleCount,
+        diversityScore: newsResults.diversityScore,
+        processingTime: newsResults.processingTime
+      },
       processingTime: processingTime,
       apiUsage: {
         gemini: geminiService.getUsageStats(),
