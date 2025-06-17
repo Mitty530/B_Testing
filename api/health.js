@@ -9,7 +9,7 @@ const router = express.Router();
 // Initialize services
 const supabase = createClient(
   process.env.SUPABASE_URL,
-  process.env.SUPABASE_ANON_KEY
+  process.env.SUPABASE_SERVICE_ROLE_KEY // Use service role for backend operations
 );
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
@@ -27,14 +27,12 @@ router.get('/', async (req, res) => {
   try {
     // Check Supabase connection
     try {
-      const { data, error } = await supabase
-        .from('users')
-        .select('count')
-        .limit(1);
-      
+      // Test basic connectivity with a simple health check function
+      const { data, error } = await supabase.rpc('health_check');
+
       healthCheck.services.supabase = {
         status: error ? 'unhealthy' : 'healthy',
-        message: error ? error.message : 'Connected successfully',
+        message: error ? error.message : 'Database connection successful',
         responseTime: Date.now()
       };
     } catch (supabaseError) {
@@ -63,24 +61,25 @@ router.get('/', async (req, res) => {
       };
     }
 
-    // Check NewsAPI.ai connection
+    // Check GNews.io connection
     try {
-      const response = await axios.get('https://newsapi.ai/api/v1/article/getArticles', {
+      const response = await axios.get('https://gnews.io/api/v4/search', {
         params: {
-          apiKey: process.env.NEWSAPI_AI_KEY,
-          query: 'test',
-          articlesCount: 1
+          q: 'sustainability',
+          token: process.env.GNEWS_API_KEY,
+          lang: 'en',
+          max: 1
         },
         timeout: 5000
       });
-      
-      healthCheck.services.newsapi = {
+
+      healthCheck.services.gnews = {
         status: response.status === 200 ? 'healthy' : 'unhealthy',
         message: response.status === 200 ? 'Connected successfully' : 'Connection failed',
         responseTime: Date.now()
       };
     } catch (newsApiError) {
-      healthCheck.services.newsapi = {
+      healthCheck.services.gnews = {
         status: 'unhealthy',
         message: newsApiError.message,
         responseTime: Date.now()
@@ -118,9 +117,10 @@ router.get('/system', (req, res) => {
     environment: {
       NODE_ENV: process.env.NODE_ENV,
       hasSupabaseUrl: !!process.env.SUPABASE_URL,
-      hasSupabaseKey: !!process.env.SUPABASE_ANON_KEY,
+      hasSupabaseAnonKey: !!process.env.SUPABASE_ANON_KEY,
+      hasSupabaseServiceKey: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
       hasGeminiKey: !!process.env.GEMINI_API_KEY,
-      hasNewsApiKey: !!process.env.NEWSAPI_AI_KEY
+      hasGNewsKey: !!process.env.GNEWS_API_KEY
     },
     timestamp: new Date().toISOString()
   });
