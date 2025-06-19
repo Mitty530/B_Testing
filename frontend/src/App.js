@@ -39,8 +39,8 @@ function App() {
         });
       }, 2000);
 
-      // Use the full URL to ensure we're hitting the right endpoint
-      const apiUrl = window.location.origin + '/api/esg-intelligence/analyze';
+      // Use the environment variable for the backend API URL
+      const apiUrl = process.env.REACT_APP_API_URL + '/esg-intelligence/analyze';
       console.log('Calling API at:', apiUrl);
 
       const response = await fetch(apiUrl, {

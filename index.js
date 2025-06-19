@@ -1,5 +1,11 @@
 const express = require('express');
+const cors = require('cors');
 const app = express();
+
+// Allow only your Netlify frontend domain
+app.use(cors({
+  origin: 'https://borouge-esg-intelligence.netlify.app'
+}));
 
 app.use(express.json());
 
