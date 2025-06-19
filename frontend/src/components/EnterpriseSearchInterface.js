@@ -6,6 +6,15 @@ import {
   ArrowRight
 } from 'lucide-react';
 
+ const quickQueries = [
+    'CBAM carbon border adjustment impact on petrochemicals',
+    'SABIC petrochemical expansion strategy Middle East',
+    'EU circular economy directive compliance requirements',
+    'Asian polyethylene market forecast 2024-2025',
+    'Carbon pricing mechanisms chemical industry',
+    'Sustainable packaging regulations global overview'
+  ];
+  
 const EnterpriseSearchInterface = ({ onSearch, isLoading }) => {
   const [query, setQuery] = useState('');
   const [isActive, setIsActive] = useState(false);
@@ -15,27 +24,20 @@ const EnterpriseSearchInterface = ({ onSearch, isLoading }) => {
 
   // Removed intelligenceTypes as the section was removed
 
-  const quickQueries = [
-    'CBAM carbon border adjustment impact on petrochemicals',
-    'SABIC petrochemical expansion strategy Middle East',
-    'EU circular economy directive compliance requirements',
-    'Asian polyethylene market forecast 2024-2025',
-    'Carbon pricing mechanisms chemical industry',
-    'Sustainable packaging regulations global overview'
-  ];
+ 
 
   // Removed features array as the section was removed
 
   useEffect(() => {
-    if (query.length > 2) {
-      const filtered = quickQueries.filter(q =>
-        q.toLowerCase().includes(query.toLowerCase())
-      );
-      setSuggestions(filtered.slice(0, 4));
-    } else {
-      setSuggestions([]);
-    }
-  }, [query]);
+  if (query.length > 2) {
+    const filtered = quickQueries.filter(q =>
+      q.toLowerCase().includes(query.toLowerCase())
+    );
+    setSuggestions(filtered.slice(0, 4));
+  } else {
+    setSuggestions([]);
+  }
+}, [query]); // Only 'query' as dependency
 
   const handleSearch = () => {
     if (query.trim() && !isLoading) {

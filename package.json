@@ -1,77 +1,13 @@
 {
   "name": "borouge-esg-intelligence",
   "version": "1.0.0",
+  "private": true,
   "description": "Borouge ESG Intelligence Platform - Strategic research intelligence for the petrochemical industry",
-  "homepage": ".",
-  "main": "api/index.js",
   "scripts": {
-    "start": "react-scripts start",
-    "build": "CI=false react-scripts build",
-    "test": "react-scripts test",
-    "eject": "react-scripts eject",
     "dev": "vercel dev",
-    "build:frontend": "cd frontend && npm install && npm run build",
-    "install-all": "npm install && cd frontend && npm install",
     "deploy": "vercel --prod"
   },
-  "dependencies": {
-    "@google/generative-ai": "^0.2.1",
-    "@supabase/supabase-js": "^2.38.0",
-    "@testing-library/jest-dom": "^5.17.0",
-    "@testing-library/react": "^13.4.0",
-    "@testing-library/user-event": "^14.5.2",
-    "@vercel/analytics": "^1.5.0",
-    "axios": "^1.6.0",
-    "cors": "^2.8.5",
-    "dotenv": "^16.3.1",
-    "express": "^4.18.2",
-    "framer-motion": "^10.16.5",
-    "helmet": "^7.1.0",
-    "lucide-react": "^0.294.0",
-    "morgan": "^1.10.0",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "react-scripts": "5.0.1",
-    "web-vitals": "^2.1.4"
-  },
   "devDependencies": {
-    "jest": "^29.7.0",
-    "nodemon": "^3.0.1"
-  },
-  "eslintConfig": {
-    "extends": [
-      "react-app",
-      "react-app/jest"
-    ]
-  },
-  "proxy": "http://localhost:3001",
-  "browserslist": {
-    "production": [
-      ">0.2%",
-      "not dead",
-      "not op_mini all"
-    ],
-    "development": [
-      "last 1 chrome version",
-      "last 1 firefox version",
-      "last 1 safari version"
-    ]
-  },
-  "engines": {
-    "node": ">=18.0.0"
-  },
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/Mitty530/borouge-esg-intelligence.git"
-  },
-  "keywords": [
-    "esg",
-    "intelligence",
-    "petrochemical",
-    "borouge",
-    "sustainability",
-    "research"
-  ],
-  "author": "Borouge ESG Intelligence Team",
-  "license": "MIT"
+    "vercel": "^32.5.0"
+  }
 }

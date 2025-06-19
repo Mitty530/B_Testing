@@ -99,11 +99,12 @@ validate_env() {
 # Borouge ESG Intelligence Platform - Production Environment Variables
 # Please update these values before deployment
 
-SUPABASE_URL=your_supabase_url_here
-SUPABASE_ANON_KEY=your_supabase_anon_key_here
-SUPABASE_SERVICE_ROLE_KEY=your_supabase_service_role_key_here
-GEMINI_API_KEY=your_gemini_api_key_here
-NEWSAPI_AI_KEY=your_newsapi_ai_key_here
+SUPABASE_URL=https://dqvhivaguuyzlmxfvgrm.supabase.co
+SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRxdmhpdmFndXV5emxteGZ2Z3JtIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDgxOTMzOTgsImV4cCI6MjA2Mzc2OTM5OH0.TuGFEQlyvvrU_KzAwwGcJzRomb9DH_o-tN3xpdcqh24
+SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImRxdmhpdmFndXV5emxteGZ2Z3JtIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc0ODE5MzM5OCwiZXhwIjoyMDYzNzY5Mzk4fQ.bTJ307Y0RJWpNYBUks0siLfuEXlfuVDzLe5ZuxPJ4H0
+GEMINI_API_KEY=AIzaSyD0wqgnyyHSgz0joVRQOhNZFjfctcdVpWg
+GNEWS_API_KEY=c39602764051b36252013d0cdc8127d5
+NEWSAPI_AI_KEY=8ce2612e-3e1f-44a5-9350-4f22ea4be225
 NODE_ENV=production
 EOF
         print_warning "Please update .env.production with your actual API keys before deploying"
@@ -116,6 +117,44 @@ EOF
     fi
     
     print_success "Environment validation completed"
+}
+
+# Set up environment variables in Vercel
+setup_vercel_env() {
+    print_status "Setting up environment variables in Vercel..."
+    
+    # Check if user is logged in to Vercel
+    if ! vercel whoami &> /dev/null; then
+        print_status "Please log in to Vercel..."
+        vercel login
+    fi
+    
+    # Load environment variables from .env.production
+    if [ -f ".env.production" ]; then
+        print_status "Loading environment variables from .env.production..."
+        
+        # Extract variables and set them in Vercel
+        SUPABASE_URL=$(grep SUPABASE_URL .env.production | cut -d '=' -f2)
+        SUPABASE_ANON_KEY=$(grep SUPABASE_ANON_KEY .env.production | cut -d '=' -f2)
+        SUPABASE_SERVICE_ROLE_KEY=$(grep SUPABASE_SERVICE_ROLE_KEY .env.production | cut -d '=' -f2)
+        GEMINI_API_KEY=$(grep GEMINI_API_KEY .env.production | cut -d '=' -f2)
+        GNEWS_API_KEY=$(grep GNEWS_API_KEY .env.production | cut -d '=' -f2)
+        NEWSAPI_AI_KEY=$(grep NEWSAPI_AI_KEY .env.production | cut -d '=' -f2)
+        
+        # Set environment variables in Vercel
+        vercel env add SUPABASE_URL production <<< "$SUPABASE_URL"
+        vercel env add SUPABASE_ANON_KEY production <<< "$SUPABASE_ANON_KEY"
+        vercel env add SUPABASE_SERVICE_ROLE_KEY production <<< "$SUPABASE_SERVICE_ROLE_KEY"
+        vercel env add GEMINI_API_KEY production <<< "$GEMINI_API_KEY"
+        vercel env add GNEWS_API_KEY production <<< "$GNEWS_API_KEY"
+        vercel env add NEWSAPI_AI_KEY production <<< "$NEWSAPI_AI_KEY"
+        vercel env add NODE_ENV production <<< "production"
+        
+        print_success "Environment variables set in Vercel"
+    else
+        print_error ".env.production file not found. Cannot set environment variables."
+        exit 1
+    fi
 }
 
 # Deploy to Vercel
@@ -133,6 +172,20 @@ deploy_to_vercel() {
     vercel --prod
     
     print_success "Deployment completed!"
+}
+
+# Test deployment
+test_deployment() {
+    print_status "Testing deployment..."
+    
+    # Get deployment URL
+    DEPLOYMENT_URL=$(vercel --prod --confirm)
+    
+    print_status "Testing API endpoints..."
+    print_status "Health check: $DEPLOYMENT_URL/api/health"
+    print_status "API test: $DEPLOYMENT_URL/api/test"
+    
+    print_success "Deployment tests completed!"
 }
 
 # Main deployment process
@@ -157,14 +210,22 @@ main() {
     validate_env
     echo ""
     
-    # Step 5: Deploy to Vercel
+    # Step 5: Set up environment variables in Vercel
+    setup_vercel_env
+    echo ""
+    
+    # Step 6: Deploy to Vercel
     deploy_to_vercel
+    echo ""
+    
+    # Step 7: Test deployment
+    test_deployment
     echo ""
     
     print_success "🎉 Borouge ESG Intelligence Platform deployed successfully!"
     echo ""
     print_status "Next steps:"
-    echo "1. Set up environment variables in Vercel dashboard"
+    echo "1. Verify environment variables in Vercel dashboard"
     echo "2. Configure custom domain (optional)"
     echo "3. Test the deployed application"
     echo "4. Monitor performance and usage"
@@ -185,18 +246,26 @@ case "${1:-}" in
     "env")
         validate_env
         ;;
+    "setup-env")
+        setup_vercel_env
+        ;;
     "deploy")
         deploy_to_vercel
+        ;;
+    "test")
+        test_deployment
         ;;
     "help"|"-h"|"--help")
         echo "Usage: $0 [command]"
         echo ""
         echo "Commands:"
-        echo "  deps     Install dependencies only"
-        echo "  build    Build frontend only"
-        echo "  env      Validate environment only"
-        echo "  deploy   Deploy to Vercel only"
-        echo "  help     Show this help message"
+        echo "  deps       Install dependencies only"
+        echo "  build      Build frontend only"
+        echo "  env        Validate environment only"
+        echo "  setup-env  Set up environment variables in Vercel"
+        echo "  deploy     Deploy to Vercel only"
+        echo "  test       Test deployment"
+        echo "  help       Show this help message"
         echo ""
         echo "Run without arguments to execute full deployment process"
         ;;

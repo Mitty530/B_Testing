@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { Analytics } from '@vercel/analytics/react';
 import EnterpriseSearchInterface from './components/EnterpriseSearchInterface';
 import EnterpriseResultsDisplay from './components/EnterpriseResultsDisplay';
@@ -13,7 +13,7 @@ function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const [showLandingPage, setShowLandingPage] = useState(true);
-  const [loadingStage, setLoadingStage] = useState('analyzing');
+  const [loadingStage] = useState('analyzing');
   const [loadingProgress, setLoadingProgress] = useState(0);
 
   // Clean up any previous results when component mounts
@@ -25,30 +25,25 @@ function App() {
     setIsLoading(true);
     setError(null);
     setSearchResults(null);
-    setShowLandingPage(false); // Hide landing page when search starts
-    setLoadingStage('analyzing');
-    setLoadingProgress(0);
-
-    // Simulate progressive loading stages
-    const progressStages = [
-      { stage: 'analyzing', progress: 25, delay: 500 },
-      { stage: 'searching', progress: 50, delay: 1000 },
-      { stage: 'processing', progress: 75, delay: 1500 },
-      { stage: 'generating', progress: 90, delay: 2000 }
-    ];
-
-    // Start progress simulation
-    progressStages.forEach(({ stage, progress, delay }) => {
-      setTimeout(() => {
-        if (isLoading) {
-          setLoadingStage(stage);
-          setLoadingProgress(progress);
-        }
-      }, delay);
-    });
+    setLoadingProgress(10);
 
     try {
-      const response = await fetch('/api/esg-intelligence/analyze', {
+      // Increment the progress to simulate loading
+      const progressInterval = setInterval(() => {
+        setLoadingProgress((prev) => {
+          if (prev >= 90) {
+            clearInterval(progressInterval);
+            return 90;
+          }
+          return prev + 10;
+        });
+      }, 2000);
+
+      // Use the full URL to ensure we're hitting the right endpoint
+      const apiUrl = window.location.origin + '/api/esg-intelligence/analyze';
+      console.log('Calling API at:', apiUrl);
+
+      const response = await fetch(apiUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -58,6 +53,14 @@ function App() {
           userId: '00000000-0000-0000-0000-000000000000' // Default user for MVP
         }),
       });
+
+      // Check if response is JSON
+      const contentType = response.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        const text = await response.text();
+        console.error('Non-JSON response received:', text);
+        throw new Error('Server returned non-JSON response. Please try again later.');
+      }
 
       const data = await response.json();
 

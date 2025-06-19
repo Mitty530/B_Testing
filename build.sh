@@ -18,6 +18,6 @@ npm install
 
 # Build frontend
 echo "🔨 Building frontend..."
-npm run build
+CI=false GENERATE_SOURCEMAP=false npm run build
 
 echo "✅ Build completed successfully!"
