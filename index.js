@@ -24,6 +24,16 @@ app.get('/api', (req, res) => {
   });
 });
 
+app.post('/api/esg-intelligence/analyze', (req, res) => {
+  // You can process req.body here
+  res.json({
+    message: 'Analysis received!',
+    query: req.body.query,
+    userId: req.body.userId,
+    result: 'This is a mock analysis result.' // Replace with your real logic
+  });
+});
+
 // (Optional) Add your other endpoints here, e.g. /api/health, /api/esg-intelligence
 
 const PORT = process.env.PORT || 3001;
