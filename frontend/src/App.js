@@ -13,10 +13,9 @@ function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const [showLandingPage, setShowLandingPage] = useState(true);
-  const [loadingStage] = useState('analyzing');
+  const [loadingStage, setLoadingStage] = useState('analyzing');
   const [loadingProgress, setLoadingProgress] = useState(0);
 
-  // Clean up any previous results when component mounts
   useEffect(() => {
     // Component initialization - no API status needed for production
   }, []);
@@ -25,23 +24,28 @@ function App() {
     setIsLoading(true);
     setError(null);
     setSearchResults(null);
-    setLoadingProgress(10);
+    setShowLandingPage(false); // Hide landing page when search starts
+    setLoadingStage('analyzing');
+    setLoadingProgress(0);
+
+    // Simulate progressive loading stages
+    const progressStages = [
+      { stage: 'analyzing', progress: 25, delay: 500 },
+      { stage: 'searching', progress: 50, delay: 1000 },
+      { stage: 'processing', progress: 75, delay: 1500 },
+      { stage: 'generating', progress: 90, delay: 2000 }
+    ];
+
+    progressStages.forEach(({ stage, progress, delay }) => {
+      setTimeout(() => {
+        setLoadingStage(stage);
+        setLoadingProgress(progress);
+      }, delay);
+    });
 
     try {
-      // Increment the progress to simulate loading
-      const progressInterval = setInterval(() => {
-        setLoadingProgress((prev) => {
-          if (prev >= 90) {
-            clearInterval(progressInterval);
-            return 90;
-          }
-          return prev + 10;
-        });
-      }, 2000);
-
       // Use the environment variable for the backend API URL
       const apiUrl = process.env.REACT_APP_API_URL + '/esg-intelligence/analyze';
-      console.log('Calling API at:', apiUrl);
 
       const response = await fetch(apiUrl, {
         method: 'POST',
@@ -50,17 +54,9 @@ function App() {
         },
         body: JSON.stringify({
           query: query,
-          userId: '00000000-0000-0000-0000-000000000000' // Default user for MVP
+          userId: '00000000-0000-0000-0000-000000000000'
         }),
       });
-
-      // Check if response is JSON
-      const contentType = response.headers.get('content-type');
-      if (!contentType || !contentType.includes('application/json')) {
-        const text = await response.text();
-        console.error('Non-JSON response received:', text);
-        throw new Error('Server returned non-JSON response. Please try again later.');
-      }
 
       const data = await response.json();
 
@@ -68,7 +64,6 @@ function App() {
         throw new Error(data.error || 'Analysis failed');
       }
 
-      // Complete the progress
       setLoadingProgress(100);
       setTimeout(() => {
         setSearchResults(data);
@@ -91,13 +86,12 @@ function App() {
   const handleClearResults = () => {
     setSearchResults(null);
     setError(null);
-    setShowLandingPage(true); // Show landing page again when clearing results
+    setShowLandingPage(true);
   };
 
   return (
     <ErrorBoundary>
       {showLandingPage ? (
-        // Enterprise Landing Page
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -110,7 +104,6 @@ function App() {
           />
         </motion.div>
       ) : isLoading ? (
-        // Advanced Loading Screen
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -123,7 +116,6 @@ function App() {
           />
         </motion.div>
       ) : searchResults ? (
-        // Enterprise Results Display
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -135,7 +127,6 @@ function App() {
           />
         </motion.div>
       ) : error ? (
-        // Error State
         <div className="min-h-screen bg-gradient-to-br from-slate-50 via-blue-50 to-indigo-50 flex items-center justify-center">
           <motion.div
             initial={{ opacity: 0, y: 20 }}
@@ -144,7 +135,7 @@ function App() {
             className="premium-card p-12 max-w-2xl mx-auto text-center"
           >
             <div className="w-16 h-16 bg-red-100 rounded-2xl flex items-center justify-center mx-auto mb-6">
-              <span className="text-red-600 text-2xl">⚠️</span>
+              <span className="text-red-600 text-2xl">⚠</span>
             </div>
             <h2 className="text-2xl font-bold text-gray-900 mb-4">
               Unable to Process Request
