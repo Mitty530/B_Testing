@@ -1,17 +1,86 @@
+// Borouge ESG Intelligence Platform - Main API Entry Point
+// Vercel Serverless Function
+
 const express = require('express');
 const cors = require('cors');
-const app = express();
+const helmet = require('helmet');
+const morgan = require('morgan');
 
-// Allow only your Netlify frontend domain
-app.use(cors({
-  origin: 'https://borouge-esg-intelligence.netlify.app'
+// Import API routes
+const esgIntelligenceRouter = require('./esg-intelligence');
+const healthRouter = require('./health');
+
+const app = express();
+// const app = require('./app');
+
+// Security middleware
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrc: ["'self'"],
+      imgSrc: ["'self'", "data:", "https:"],
+      connectSrc: ["'self'", "https://dqvhivaguuyzlmxfvgrm.supabase.co", "https://generativelanguage.googleapis.com", "https://newsapi.ai"]
+    }
+  }
 }));
 
-app.use(express.json());
+// CORS configuration
+// app.use(cors({
+//   origin: process.env.NODE_ENV === 'production' 
+//     ? ['https://borouge-esg-intelligence.vercel.app', 'https://borougeclient1.vercel.app']
+//     : ['http://localhost:3000', 'http://localhost:3001'],
+//   credentials: true,
+//   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+//   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+// }));
+// app.use(cors({
+//   origin: function (origin, callback) {
+//     const allowedOrigins = [
+//       'https://testing-repo-hil6.vercel.app', // your frontend
+//       'http://localhost:3000'                // local dev
+//     ];
+
+//     if (!origin || allowedOrigins.includes(origin)) {
+//       callback(null, true);
+//     } else {
+//       callback(new Error('CORS not allowed from this origin: ' + origin));
+//     }
+//   },
+//   credentials: true,
+//   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+//   allowedHeaders: ['Content-Type', 'Authorization']
+// }));
+app.use(cors({
+  origin: 'https://borougeesginsights.vercel.app',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
+
+// app.use(cors({
+//   origin: '*', // Accept any frontend origin
+//   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+//   allowedHeaders: ['Content-Type', 'Authorization']
+// }));
+
+// Body parsing middleware
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Logging middleware
+if (process.env.NODE_ENV !== 'production') {
+  app.use(morgan('dev'));
+}
+
+// API Routes
+app.use('/api/health', healthRouter);
+app.use('/api/esg-intelligence', esgIntelligenceRouter);
 
 // Root endpoint
 app.get('/api', (req, res) => {
-  res.status(200).json({
+  res.json({
     message: 'Borouge ESG Intelligence Platform API',
     version: '1.0.0',
     status: 'operational',
@@ -24,22 +93,36 @@ app.get('/api', (req, res) => {
   });
 });
 
-const esgIntelligenceRouter = require('./backend/esg-intelligence');
-app.use('/api/esg-intelligence', esgIntelligenceRouter);
-
-// app.post('/api/esg-intelligence/analyze', (req, res) => {
-//   // You can process req.body here
-//   res.json({
-//     message: 'Analysis received!',
-//     query: req.body.query,
-//     userId: req.body.userId,
-//     result: 'This is a mock analysis result.' // Replace with your real logic
-//   });
-// });
-
-// (Optional) Add your other endpoints here, e.g. /api/health, /api/esg-intelligence
-
-const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => {
-  console.log(`API running on port ${PORT}`);
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error('API Error:', err);
+  
+  const isDevelopment = process.env.NODE_ENV !== 'production';
+  
+  res.status(err.status || 500).json({
+    error: {
+      message: err.message || 'Internal Server Error',
+      status: err.status || 500,
+      timestamp: new Date().toISOString(),
+      ...(isDevelopment && { stack: err.stack })
+    }
+  });
 });
+
+// 404 handler
+app.use('*', (req, res) => {
+  res.status(404).json({
+    error: {
+      message: 'API endpoint not found',
+      status: 404,
+      path: req.originalUrl,
+      timestamp: new Date().toISOString()
+    }
+  });
+});
+
+// Export for Vercel
+// module.exports = app;
+module.exports = (req, res) => {
+  return app(req, res);
+};
