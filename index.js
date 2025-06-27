@@ -6,9 +6,14 @@ const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
 
+// ./esg-intelligence
+// ./health
 // Import API routes
-const esgIntelligenceRouter = require('./esg-intelligence');
-const healthRouter = require('./health');
+// const esgIntelligenceRouter = require('backend/esg-intelligence');
+// const healthRouter = require('backend/health');
+
+const esgIntelligenceRouter = require('./backend/esg-intelligence');
+const healthRouter = require('./backend/health');
 
 const app = express();
 // const app = require('./app');
