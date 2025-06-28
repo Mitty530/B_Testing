@@ -114,7 +114,14 @@ app.use((err, req, res, next) => {
   });
 });
 
-// 404 handler
+// ...existing code...
+
+// Redirect root "/" to frontend home page
+app.get('/', (req, res) => {
+  res.redirect('https://borougeesginsights.vercel.app');
+});
+
+// 404 handler (keep this after the redirect)
 app.use('*', (req, res) => {
   res.status(404).json({
     error: {
